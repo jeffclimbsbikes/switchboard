@@ -1,0 +1,54 @@
+{
+  "name": "@jeffclimbsbikes/switchboard",
+  "version": "0.1.0",
+  "description": "MCP control plane for coding-agent sessions: start, steer, answer and resume Claude Code or any ACP agent from any MCP client, including claude.ai.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "switchboard": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jeffclimbsbikes/switchboard.git"
+  },
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "agent-client-protocol",
+    "acp",
+    "coding-agents",
+    "opencode"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^2.7.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.325",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^5.3.0",
+    "jose": "^6.2.17",
+    "smol-toml": "^1.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.7",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

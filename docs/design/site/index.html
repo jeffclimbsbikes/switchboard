@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>switchboard design</title>
+<meta name="description" content="An MCP server that lets regular Claude (even by voice) start, steer and resume Claude Code or any ACP agent on the Pi, with real back-and-forth and legit OAuth behind Cloudflare.">
+<meta name="trove:stat" content="Tools: 7">
+<meta name="trove:stat" content="Drivers: Claude SDK + ACP">
+<meta name="trove:stat" content="Max wait per call: 25 s">
+<meta name="trove:stat" content="Secrets in CI: 0">
+<meta name="trove:stat" content="Diagrams: 7">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; --bg: #f8fafc; --card: #ffffff;
+    --sb: #4f46e5; --sb-soft: #eef2ff; --cf: #f38020; --claude: #d97757; --pi: #10b981; --agent: #8b5cf6;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: light; scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 Inter, system-ui, sans-serif; }
+  a { color: var(--sb); }
+  code, pre { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+
+  header.hero { background: radial-gradient(1200px 400px at 10% -10%, #e0e7ff 0, transparent 60%),
+                radial-gradient(900px 400px at 100% 0, #ffedd5 0, transparent 55%), #fff;
+                border-bottom: 1px solid var(--line); }
+  .hero .wrap { padding: 56px 20px 36px; }
+  .eyebrow { font: 600 12px/1 Inter; letter-spacing: .14em; text-transform: uppercase; color: var(--sb); }
+  h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1; margin: 12px 0 14px; letter-spacing: -.03em; font-weight: 800; }
+  h1 span { background: linear-gradient(90deg, #4f46e5, #8b5cf6 45%, #f38020); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { font-size: clamp(18px, 2.2vw, 22px); color: #334155; max-width: 760px; margin: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; padding: 0; list-style: none; }
+  .chips li { background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 13px; color: #334155; }
+  .chips b { color: var(--ink); }
+
+  nav.toc { position: sticky; top: 0; z-index: 5; background: rgba(248,250,252,.9); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav.toc .wrap { display: flex; gap: 4px; overflow-x: auto; padding: 8px 20px; scrollbar-width: none; }
+  nav.toc a { white-space: nowrap; text-decoration: none; color: #334155; font-size: 14px; padding: 6px 10px; border-radius: 8px; }
+  nav.toc a:hover { background: var(--sb-soft); color: var(--sb); }
+
+  section { padding: 44px 0 8px; scroll-margin-top: 50px; }
+  h2 { font-size: 28px; letter-spacing: -.02em; margin: 0 0 6px; }
+  h2 small { font-size: 14px; font-weight: 600; color: var(--muted); margin-left: 8px; letter-spacing: 0; }
+  .sub { color: var(--muted); margin: 0 0 18px; max-width: 820px; }
+
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 14px;
+           box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 12px 32px -18px rgba(15,23,42,.18); }
+  figure a.zoom { display: block; overflow-x: auto; }
+  figure img { display: block; width: 100%; height: auto; min-width: 720px; }
+  figcaption { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); padding: 10px 4px 0; }
+  figcaption a { color: var(--muted); }
+
+  .grid { display: grid; gap: 14px; }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: #475569; font-size: 14px; }
+  .tag { display: inline-block; font: 600 11px/1 Inter; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 6px; margin-bottom: 8px; }
+  .t-take { background: #dcfce7; color: #166534; } .t-skip { background: #fee2e2; color: #991b1b; } .t-use { background: #e0e7ff; color: #3730a3; }
+
+  table.tools { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; font-size: 14px; }
+  .tools th, .tools td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tools th { background: #f1f5f9; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .tools tr:last-child td { border-bottom: 0; }
+  .tools td:first-child code { color: var(--sb); font-weight: 600; }
+  .tools td code { font-size: 12.5px; }
+  .scroll { overflow-x: auto; }
+
+  pre.cfg { background: #0f172a; color: #e2e8f0; border-radius: 14px; padding: 18px 20px; overflow-x: auto; font-size: 13px; line-height: 1.6; margin: 0; }
+  pre.cfg .c { color: #64748b; } pre.cfg .k { color: #a5b4fc; } pre.cfg .s { color: #fdba74; } pre.cfg .h { color: #86efac; }
+
+  ol.track { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0; counter-reset: m; }
+  ol.track li { position: relative; padding: 46px 14px 8px 0; counter-increment: m; }
+  ol.track li::before { content: counter(m); position: absolute; top: 0; left: 0; width: 32px; height: 32px; border-radius: 50%;
+                        background: var(--sb); color: #fff; font-weight: 700; display: grid; place-items: center; z-index: 1; }
+  ol.track li::after { content: ""; position: absolute; top: 15px; left: 32px; right: 0; height: 2px; background: #c7d2fe; }
+  ol.track li:last-child::after { display: none; }
+  ol.track b { display: block; font-size: 15px; } ol.track span { color: #475569; font-size: 13.5px; }
+
+  .risk { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; }
+  .risk .i { font-size: 22px; line-height: 1; }
+  footer { color: var(--muted); font-size: 13px; padding: 40px 0 60px; }
+  @media (max-width: 640px) { section { padding-top: 32px; } h2 { font-size: 23px; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Design · switchboard v0.1 · Nov 2026</div>
+    <h1><span>switchboard</span></h1>
+    <p class="lede">Talk to Claude, by voice if you like. It hands the work to a real coding agent on your Pi, relays the agent's questions back to you, and tells you when it's done.</p>
+    <ul class="chips">
+      <li><b>MCP server</b> · a control plane for coding-agent sessions</li>
+      <li><b>Claude Code</b> first · any <b>ACP</b> agent next (OpenCode, Codex, Gemini)</li>
+      <li><b>OAuth 2.1</b> connector for claude.ai · Cloudflare in front</li>
+      <li>Standalone · <code>npx switchboard</code> · Node 22+</li>
+    </ul>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections"><div class="wrap">
+  <a href="#system">The whole system</a><a href="#conversation">A conversation</a><a href="#inside">Inside</a>
+  <a href="#tools">Tools &amp; config</a><a href="#lifecycle">Lifecycle</a><a href="#auth">Auth &amp; Cloudflare</a>
+  <a href="#testing">Testing</a><a href="#prior-art">Prior art</a><a href="#plan">Unknowns &amp; plan</a>
+</div></nav>
+
+<main class="wrap">
+
+<section id="system">
+  <h2>The whole system</h2>
+  <p class="sub">Follow the numbers. Claude never touches the Pi directly: every step is a short tool call through Cloudflare to switchboard, which drives the agent.</p>
+  <figure id="fig-system">
+    <a class="zoom" href="diagrams/1-system.svg" target="_blank" rel="noopener"><img src="diagrams/1-system.svg" alt="Whole system: you, Anthropic, Cloudflare edge, and pidev with switchboard, coding agents and workspace"></a>
+    <figcaption><span>Click to open full size</span><a href="diagrams/1-system.drawio" download>1-system.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="conversation">
+  <h2>A conversation</h2>
+  <p class="sub">The agent can ask; Claude answers from what you already said, or asks you out loud. Hang up mid-build and nothing is lost: Telegram pings you when it's done.</p>
+  <figure id="fig-conversation">
+    <a class="zoom" href="diagrams/2-conversation.svg" target="_blank" rel="noopener"><img src="diagrams/2-conversation.svg" alt="Sequence: you, Claude, switchboard, Claude Code, Telegram, including a clarifying question"></a>
+    <figcaption><span>One session, five phases</span><a href="diagrams/2-conversation.drawio" download>2-conversation.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="inside">
+  <h2>Inside switchboard</h2>
+  <p class="sub">Green is reused, indigo is ours. Two drivers behind one small interface: Claude through its own Agent SDK (the cleanest way to answer its questions and approvals), everything else through ACP.</p>
+  <figure id="fig-inside">
+    <a class="zoom" href="diagrams/3-inside.svg" target="_blank" rel="noopener"><img src="diagrams/3-inside.svg" alt="Layers: edge, tools, core, driver interface, drivers; a turn path and a question path"></a>
+    <figcaption><span>Blue path: a turn · amber path: a question</span><a href="diagrams/3-inside.drawio" download>3-inside.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="tools">
+  <h2>Tools &amp; config</h2>
+  <p class="sub">Seven tools, named for how you'd say them. Every call returns within <code>max_wait</code>; anything longer is picked up with <code>wait</code>.</p>
+  <div class="grid g2">
+    <div class="scroll">
+      <table class="tools">
+        <thead><tr><th>Tool</th><th>Takes</th><th>Returns</th></tr></thead>
+        <tbody>
+          <tr><td><code>agents</code></td><td>—</td><td>agents, models, workspaces</td></tr>
+          <tr><td><code>start</code></td><td><code>prompt</code>, agent?, workspace?, model?</td><td>session name (“otter”), state, reply or question, cursor</td></tr>
+          <tr><td><code>send</code></td><td><code>session</code>, <code>message</code></td><td>same; resumes a parked session</td></tr>
+          <tr><td><code>wait</code></td><td><code>session</code>, cursor?, seconds ≤ 25</td><td>what it's doing now, question, or final reply</td></tr>
+          <tr><td><code>respond</code></td><td><code>session</code>, <code>request</code>, answer</td><td>state (agent continues)</td></tr>
+          <tr><td><code>sessions</code></td><td>state?</td><td>one line each: name, agent, state, last activity</td></tr>
+          <tr><td><code>stop</code></td><td><code>session</code>, interrupt | close</td><td>state</td></tr>
+        </tbody>
+      </table>
+      <p class="sub" style="margin-top:12px">The server's MCP <code>instructions</code> tell Claude: this is a live coding agent; relay its questions, answer only what you already know, keep the user posted in a sentence, and say when they'll get a ping.</p>
+    </div>
+<pre class="cfg"><span class="c"># ~/.config/switchboard/config.toml</span>
+<span class="k">listen</span>     = <span class="s">"127.0.0.1:8787"</span>
+<span class="k">public_url</span> = <span class="s">"https://build.rutang.cloud"</span>
+<span class="k">max_wait</span>   = <span class="s">"25s"</span>
+
+<span class="h">[agents.claude]</span>
+<span class="k">driver</span>     = <span class="s">"claude"</span>
+<span class="k">executable</span> = <span class="s">"/home/jeff/.local/bin/claude"</span>
+<span class="k">model</span>      = <span class="s">"opus"</span>               <span class="c"># Opus 5.5</span>
+<span class="k">permission_mode</span> = <span class="s">"bypassPermissions"</span>
+
+<span class="h">[agents.opencode]</span>
+<span class="k">driver</span>  = <span class="s">"acp"</span>
+<span class="k">command</span> = [<span class="s">"opencode"</span>, <span class="s">"acp"</span>]
+
+<span class="h">[workspaces]</span>
+<span class="k">pidev</span> = <span class="s">"/home/jeff/src/pidev"</span>
+
+<span class="h">[auth]</span>                      <span class="c"># off for stdio</span>
+<span class="k">login</span> = <span class="s">"cloudflare-access"</span>
+<span class="k">team</span>  = <span class="s">"rutang"</span>
+<span class="k">aud</span>   = <span class="s">"…"</span>                  <span class="c"># terraform output</span>
+<span class="k">allow</span> = [<span class="s">"you@example.com"</span>]
+
+<span class="h">[notify]</span>
+<span class="k">telegram</span>      = { <span class="k">token_env</span> = <span class="s">"TELEGRAM_BOT_TOKEN"</span>, <span class="k">chat</span> = <span class="s">"…"</span> }
+<span class="k">nag_after</span>     = <span class="s">"10m"</span>          <span class="c"># unanswered question</span></pre>
+  </div>
+</section>
+
+<section id="lifecycle">
+  <h2>Session lifecycle</h2>
+  <p class="sub">“Waiting” is a first-class state that holds until someone answers. Idle sessions park (process exits, context stays on disk) and resume on the next <code>send</code>.</p>
+  <figure id="fig-lifecycle">
+    <a class="zoom" href="diagrams/4-lifecycle.svg" target="_blank" rel="noopener"><img src="diagrams/4-lifecycle.svg" alt="State machine: starting, working, waiting, idle, parked, failed, closed; plus a bounded-wait timeline"></a>
+    <figcaption><span>Bottom: how 25-second calls add up to a long job</span><a href="diagrams/4-lifecycle.drawio" download>4-lifecycle.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="auth">
+  <h2>Auth &amp; Cloudflare</h2>
+  <p class="sub">switchboard is its own OAuth 2.1 server, the full flow claude.ai expects. Cloudflare Access guards only the one human step, so claude.ai's servers never hit a login page. (Cloudflare's built-in MCP OAuth fails with claude.ai today, so we don't use it.)</p>
+  <figure id="fig-oauth">
+    <a class="zoom" href="diagrams/5-oauth.svg" target="_blank" rel="noopener"><img src="diagrams/5-oauth.svg" alt="OAuth sequence: discovery, Access-guarded authorize, tokens"></a>
+    <figcaption><span>Adding the connector, once</span><a href="diagrams/5-oauth.drawio" download>5-oauth.drawio</a></figcaption>
+  </figure>
+  <div style="height:16px"></div>
+  <figure id="fig-cloudflare">
+    <a class="zoom" href="diagrams/6-cloudflare.svg" target="_blank" rel="noopener"><img src="diagrams/6-cloudflare.svg" alt="Cloudflare routing decisions, tunnel ingress, Pi services, Terraform resources"></a>
+    <figcaption><span>Routing + the Terraform we add</span><a href="diagrams/6-cloudflare.drawio" download>6-cloudflare.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="testing">
+  <h2>Testing without secrets</h2>
+  <p class="sub">Every outside dependency has a stand-in, so CI runs the full flows (questions, resume, OAuth) with no keys. Real agents and the real connector are checked by hand on the Pi.</p>
+  <figure id="fig-testing">
+    <a class="zoom" href="diagrams/7-testing.svg" target="_blank" rel="noopener"><img src="diagrams/7-testing.svg" alt="Real dependencies mapped to fakes; CI test layers; manual checks"></a>
+    <figcaption><span>CI: GitHub Actions, Node 22 + 24</span><a href="diagrams/7-testing.drawio" download>7-testing.drawio</a></figcaption>
+  </figure>
+</section>
+
+<section id="prior-art">
+  <h2>Prior art</h2>
+  <p class="sub">Nothing out there does the important part (answering an agent's questions remotely), but plenty to learn from.</p>
+  <div class="grid g3">
+    <div class="card"><span class="tag t-take">borrow</span><h3>Xirp · Spotify</h3><p>Vendor-neutral desktop app for Claude Code, Codex, Gemini. A git worktree per task and one status view for every session.</p></div>
+    <div class="card"><span class="tag t-take">borrow</span><h3>Honk · Spotify</h3><p>Runs the Agent SDK inside their own harness instead of scraping a terminal. Same move here.</p></div>
+    <div class="card"><span class="tag t-use">use</span><h3>Agent Client Protocol</h3><p>Zed's standard for driving agents: sessions, prompts, permission requests, questions, resume. Our generic driver.</p></div>
+    <div class="card"><span class="tag t-take">borrow</span><h3>claude-code-rc-mcp</h3><p>Claude connector over tmux + transcripts. Good: capped waits, server-chosen session ids. Can't answer questions.</p></div>
+    <div class="card"><span class="tag t-skip">avoid</span><h3>claude-sessions-mcp</h3><p>Drives the Remote Control bridge's undocumented API with your claude.ai token. Nice cursors; too fragile to build on.</p></div>
+    <div class="card"><span class="tag t-take">borrow</span><h3>Omnara · Happy</h3><p>Phone-first agent control. Borrow per-tool allow / ask / block rules and outbound-only connectivity.</p></div>
+  </div>
+</section>
+
+<section id="plan">
+  <h2>Unknowns &amp; plan</h2>
+  <p class="sub">Settle the risky bits first, with a stub server, before building the rest.</p>
+  <div class="grid g2">
+    <div class="card risk"><div class="i">🎙️</div><div><h3>Voice + custom connectors</h3><p>Voice mode can use tools, but there's an open report of custom connector tools failing in voice only. Test day one; Telegram covers “done” either way.</p></div></div>
+    <div class="card risk"><div class="i">⏱️</div><div><h3>Real tool-call timeout</h3><p>Docs say 240 s; some report 30–60 s. Default <code>max_wait</code> 25 s, configurable.</p></div></div>
+    <div class="card risk"><div class="i">🛡️</div><div><h3>Access precedence</h3><p>An exact-host bypass app should beat the <code>*.rutang.cloud</code> wildcard. Check with curl from off-WARP right after apply.</p></div></div>
+    <div class="card risk"><div class="i">🧩</div><div><h3>OpenCode event shapes</h3><p>How its questions surface over ACP is unprobed. A short spike before the ACP driver.</p></div></div>
+  </div>
+  <div style="height:22px"></div>
+  <ol class="track">
+    <li><b>Core over stdio</b><span>tools, session manager, FakeDriver; usable from Claude Code on the Mac</span></li>
+    <li><b>ClaudeDriver</b><span>Agent SDK, questions and approvals, resume; fake-claude + live smoke</span></li>
+    <li><b>HTTP + OAuth</b><span>own AS, CIMD/DCR, Access JWT login, token tests</span></li>
+    <li><b>On the Pi</b><span>systemd, Terraform, Telegram; connect from claude.ai, try voice</span></li>
+    <li><b>AcpDriver</b><span>OpenCode first, then Codex and Gemini by config</span></li>
+    <li><b>Polish</b><span>worktree per session, per-tool rules, “open in Claude app” link</span></li>
+  </ol>
+</section>
+
+</main>
+<footer class="wrap">Diagrams are draw.io files with the source embedded: open any SVG or .drawio in draw.io to edit. Research notes and decisions live in the switchboard repo (<code>NOTES.md</code>, <code>design/research/</code>).</footer>
+</body>
+</html>
