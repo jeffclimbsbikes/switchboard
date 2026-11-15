@@ -1,4 +1,4 @@
-import { type Config, workspaces as configWorkspaces } from "../config.js";
+import { agentDefaultModel, agentModels, type Config, workspaces as configWorkspaces } from "../config.js";
 import type { Db } from "../db.js";
 import type { AgentSession, Driver, DriverEvent } from "../drivers/driver.js";
 import type {
@@ -7,6 +7,7 @@ import type {
   DashboardSession,
   DashboardSessionDetail,
   DashboardSnapshot,
+  ModelInfo,
   SessionState,
   SessionSummary,
   SessionView,
@@ -26,6 +27,7 @@ import { pickName } from "./names.js";
 import { type Notifier, nullNotifier } from "./notifier.js";
 import { type Access, canSee, resolveAccess } from "./policy.js";
 import { type SessionRow, SessionStore, type StoredEvent } from "./store.js";
+import { UsageService } from "./usage.js";
 
 export interface SessionManagerOptions {
   config: Config;
@@ -33,6 +35,7 @@ export interface SessionManagerOptions {
   drivers: Record<string, Driver>;
   notifier?: Notifier;
   now?: () => Date;
+  usage?: UsageService;
 }
 
 interface Proc {
@@ -62,6 +65,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
   private readonly notifier: Notifier;
   private readonly now: () => Date;
   private readonly store: SessionStore;
+  readonly usage: UsageService;
   private readonly live = new Map<string, Proc>();
   private readonly waiters = new Map<string, Set<Waiter>>();
 
@@ -71,6 +75,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     this.notifier = options.notifier ?? nullNotifier;
     this.now = options.now ?? (() => new Date());
     this.store = new SessionStore(options.db);
+    this.usage = options.usage ?? new UsageService({ config: options.config, db: options.db, now: this.now });
     this.recover();
   }
 
@@ -78,13 +83,30 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     const access = resolveAccess(this.config, caller);
     return Object.entries(this.config.agents)
       .filter(([id]) => access.agents.includes(id))
-      .map(([id, a]) => ({
-        id,
-        driver: a.driver,
-        ...("model" in a && a.model ? { model: a.model } : {}),
-        ...(a.description ? { description: a.description } : {}),
-        default: id === access.defaultAgent,
-      }));
+      .map(([id, a]) => {
+        const model = agentDefaultModel(a);
+        const models = agentModels(a);
+        return {
+          id,
+          driver: a.driver,
+          ...(model ? { model } : {}),
+          ...(a.description ? { description: a.description } : {}),
+          ...(models.length ? { models } : {}),
+          default: id === access.defaultAgent,
+        };
+      });
+  }
+
+  usageHint(caller?: Caller): string | undefined {
+    const drivers = this.agents(caller).map((a) => a.driver);
+    return this.usage.hint({
+      claude: drivers.includes("claude"),
+      ollama: drivers.includes("acp"),
+    });
+  }
+
+  touchUsage(): void {
+    this.usage.tick();
   }
 
   workspaces(caller?: Caller): WorkspaceInfo[] {
@@ -105,16 +127,28 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     const sessions = [...shown, ...closed].map((row) =>
       this.dashboardSession(row, access, row.state !== "closed"),
     );
-    const agents: DashboardAgent[] = this.agents(caller).map((a) => {
+    const visibleAgents = this.agents(caller);
+    const catalog: Record<string, ModelInfo[]> = {};
+    const agents: DashboardAgent[] = visibleAgents.map((a) => {
       const configured = this.config.agents[a.id];
       const liveSessions = sessions.filter((s) => s.live && s.agent === a.id).map((s) => s.name);
       const runAs =
         !access.restricted && configured && "run_as" in configured ? configured.run_as : undefined;
-      return { ...a, ...(runAs && { runAs }), live: liveSessions.length, liveSessions };
+      const { models, ...info } = a;
+      if (models) catalog[a.id] = models;
+      return { ...info, ...(runAs && { runAs }), live: liveSessions.length, liveSessions };
     });
+    const drivers = visibleAgents.map((a) => a.driver);
     return {
       viewer: { ...(access.email && { email: access.email }), restricted: access.restricted },
       agents,
+      catalog,
+      usage: this.usage.snapshot({
+        agents: visibleAgents,
+        rows,
+        includeClaude: drivers.includes("claude"),
+        includeOllama: drivers.includes("acp"),
+      }),
       workspaces: this.workspaces(caller),
       sessions,
       counts: {
@@ -192,11 +226,18 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     }
     const driver = this.drivers[agentId];
     if (!driver) throw new SwitchboardError(`The ${agentId} agent is not available.`, "bad_input");
+    const catalog = agentModels(agent);
+    if (input.model && catalog.length > 0 && !catalog.some((m) => m.id === input.model)) {
+      throw new SwitchboardError(
+        `The ${agentId} agent has no model called ${input.model}. Choose one of: ${catalog.map((m) => m.id).join(", ")}.`,
+        "bad_input",
+      );
+    }
 
     await this.ensureCapacity();
 
     const name = pickName(this.store.names());
-    const model = input.model ?? ("model" in agent ? agent.model : undefined);
+    const model = input.model ?? agentDefaultModel(agent);
     const at = this.stamp();
     this.store.create({
       name,
@@ -329,6 +370,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
   }
 
   async shutdown(): Promise<void> {
+    this.usage.stop();
     const procs = [...this.live.values()];
     this.live.clear();
     await Promise.all(procs.map((p) => this.retire(p)));
@@ -443,6 +485,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       cwd: row.cwd,
       model: row.model,
       resume: row.agentSessionId,
+      priorCostUsd: row.usage?.costUsd ?? 0,
       appendSystemPrompt: "append_system_prompt" in agent ? agent.append_system_prompt : undefined,
     });
   }
@@ -454,6 +497,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       cwd: string;
       model?: string | undefined;
       resume?: string;
+      priorCostUsd?: number;
       appendSystemPrompt?: string | undefined;
     },
   ): Promise<void> {
@@ -463,7 +507,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       proc.session = await driver.start({
         cwd: opts.cwd,
         ...(opts.model && { model: opts.model }),
-        ...(opts.resume && { resume: opts.resume }),
+        ...(opts.resume && { resume: opts.resume, priorCostUsd: opts.priorCostUsd ?? 0 }),
         ...(opts.appendSystemPrompt && { appendSystemPrompt: opts.appendSystemPrompt }),
         onEvent: (event) => this.onEvent(name, proc, event),
       });
@@ -503,8 +547,12 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
 
   private onEvent(name: string, proc: Proc, event: DriverEvent): void {
     if (proc.dead) return;
-    const waiting = (this.waiters.get(name)?.size ?? 0) > 0;
     const at = this.stamp();
+    if (event.type === "rate_limit") {
+      this.usage.noteRateLimit(event, at);
+      return;
+    }
+    const waiting = (this.waiters.get(name)?.size ?? 0) > 0;
     const line = condenseActivity([event])[0];
     const patch = { updatedAt: at, ...(line && { lastActivity: line }) };
     switch (event.type) {
@@ -524,6 +572,9 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       case "turn_end": {
         this.clearNag(proc);
         this.store.update(name, { ...patch, state: "idle", pending: null });
+        this.store.addTurn(name, event);
+        const agent = this.store.get(name)?.agent;
+        if (agent) this.usage.recordTurn({ name, agent }, at, event);
         this.armPark(name, proc);
         const reply = event.result ?? proc.lastText ?? "";
         if (!waiting && event.stopReason !== "cancelled") {

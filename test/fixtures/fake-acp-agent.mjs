@@ -34,6 +34,7 @@ const modelOption = {
   options: [
     { value: "fake-small", name: "Fake Small" },
     { value: "fake-large", name: "Fake Large" },
+    { value: "fake-cloud/kimi-k3.1-pro", name: "fake-cloud/Kimi K3.1 Pro" },
   ],
 };
 
@@ -162,6 +163,22 @@ async function runScript(client, sessionId, line) {
       const cancelled = await sleep(Number(rest[0] ?? 1000), sessionId);
       if (cancelled) return "cancelled";
       await text(client, sessionId, "slept");
+      return "end_turn";
+    }
+    case "spend": {
+      const state = load(sessionId);
+      state.spent = (state.spent ?? 0) + Number(rest[0] ?? 0);
+      save(sessionId, state);
+      await client.notify(acp.methods.client.session.update, {
+        sessionId,
+        update: {
+          sessionUpdate: "usage_update",
+          used: 10,
+          size: 1000,
+          cost: { amount: state.spent, currency: "USD" },
+        },
+      });
+      await text(client, sessionId, `spent ${rest[0]}`);
       return "end_turn";
     }
     case "crash":

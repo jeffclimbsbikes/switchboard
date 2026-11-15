@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
+import type { ModelInfo } from "./types.js";
 
 const duration = z
   .union([z.number().int().nonnegative(), z.string().regex(/^\d+(ms|s|m|h)$/)])
@@ -22,6 +23,33 @@ const description = z.string().max(300).optional();
 
 const unixUser = z.string().regex(/^[a-z_][a-z0-9_-]*\$?$/i, "not a valid Unix username");
 
+const price = z.number().nonnegative();
+
+const modelEntry = z.object({
+  id: z.string().min(1),
+  label: z.string().max(100).optional(),
+  description: z.string().max(300).optional(),
+  input_price: price.optional(),
+  output_price: price.optional(),
+  notes: z.string().max(500).optional(),
+  default: z.boolean().default(false),
+});
+
+const models = z
+  .array(modelEntry)
+  .superRefine((list, ctx) => {
+    const seen = new Set<string>();
+    for (const [i, m] of list.entries()) {
+      if (seen.has(m.id))
+        ctx.addIssue({ code: "custom", path: [i, "id"], message: `duplicate model "${m.id}"` });
+      seen.add(m.id);
+    }
+    if (list.filter((m) => m.default).length > 1) {
+      ctx.addIssue({ code: "custom", message: "at most one model can be the default" });
+    }
+  })
+  .optional();
+
 const claudeAgent = z.object({
   driver: z.literal("claude"),
   executable: path.optional(),
@@ -31,6 +59,7 @@ const claudeAgent = z.object({
     .default("default"),
   append_system_prompt: z.string().optional(),
   run_as: unixUser.optional(),
+  models,
   description,
   default: z.boolean().default(false),
 });
@@ -41,12 +70,14 @@ const acpAgent = z.object({
   env: z.record(z.string(), z.string()).default({}),
   model: z.string().optional(),
   run_as: unixUser.optional(),
+  models,
   description,
   default: z.boolean().default(false),
 });
 
 const fakeAgent = z.object({
   driver: z.literal("fake"),
+  models,
   description,
   default: z.boolean().default(false),
 });
@@ -76,6 +107,13 @@ const notify = z
   })
   .default({ nag_after: 600_000 });
 
+const usage = z
+  .object({
+    ollama: z.object({ api_key_env: z.string().min(1).default("OLLAMA_API_KEY") }).optional(),
+    claude: z.object({ probe: z.boolean().default(false) }).optional(),
+  })
+  .default({});
+
 const user = z.object({
   agents: z.array(z.string()).optional(),
   workspaces: z.array(z.string()).optional(),
@@ -103,6 +141,7 @@ export const configSchema = z
       .refine((w) => Object.keys(w).length > 0, "configure at least one workspace"),
     auth: auth.default({ login: "none" }),
     notify,
+    usage,
     users,
   })
   .superRefine((config, ctx) => {
@@ -134,6 +173,7 @@ export type Config = z.output<typeof configSchema>;
 export type AgentConfig = z.output<typeof agent>;
 export type AuthConfig = z.output<typeof auth>;
 export type NotifyConfig = z.output<typeof notify>;
+export type UsageConfig = z.output<typeof usage>;
 
 export function expandHome(p: string): string {
   if (p === "~") return homedir();
@@ -161,6 +201,23 @@ export function defaultConfigPath(): string {
 export function defaultAgentId(config: Config): string {
   const entries = Object.entries(config.agents);
   return (entries.find(([, a]) => a.default) ?? entries[0])?.[0] as string;
+}
+
+export function agentModels(agent: AgentConfig): ModelInfo[] {
+  return (agent.models ?? []).map((m) => ({
+    id: m.id,
+    ...(m.label && { label: m.label }),
+    ...(m.description && { description: m.description }),
+    ...(m.input_price !== undefined && { inputPrice: m.input_price }),
+    ...(m.output_price !== undefined && { outputPrice: m.output_price }),
+    ...(m.notes && { notes: m.notes }),
+    default: m.default,
+  }));
+}
+
+/** The agent's own `model` wins; the catalog default only fills in when it is unset. */
+export function agentDefaultModel(agent: AgentConfig): string | undefined {
+  return ("model" in agent ? agent.model : undefined) ?? agent.models?.find((m) => m.default)?.id;
 }
 
 export function workspaces(

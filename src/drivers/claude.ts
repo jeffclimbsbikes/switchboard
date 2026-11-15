@@ -7,9 +7,11 @@ import {
   type Query,
   query,
   type SDKMessage,
+  type SDKRateLimitInfo,
+  type SDKResultMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { Answer, ApprovalOption, PendingRequest, Question, StopReason } from "../types.js";
+import type { Answer, ApprovalOption, PendingRequest, Question, StopReason, TokenUsage } from "../types.js";
 import type { AgentSession, Driver, DriverEvent, DriverStartOptions } from "./driver.js";
 import { spawnClaudeAs } from "./run-as.js";
 
@@ -42,6 +44,30 @@ export function summarizeTool(name: string, input: unknown): string {
     }
   }
   return name;
+}
+
+const PLAN_STATUS = { allowed: "allowed", allowed_warning: "warning", rejected: "rejected" } as const;
+
+/** The SDK reports utilization as a fraction; anything above 1 can only be a percentage. */
+export function normalizeUtilization(value: number): number {
+  return value > 1 ? value / 100 : value;
+}
+
+/** Epoch seconds from the SDK (milliseconds tolerated) to an ISO timestamp. */
+export function resetsAtIso(epoch: number): string {
+  return new Date(epoch < 1e12 ? epoch * 1000 : epoch).toISOString();
+}
+
+export function rateLimitEvent(info: SDKRateLimitInfo): DriverEvent | undefined {
+  if (!info.rateLimitType) return undefined;
+  return {
+    type: "rate_limit",
+    provider: "claude",
+    window: info.rateLimitType,
+    status: PLAN_STATUS[info.status] ?? "allowed",
+    ...(typeof info.utilization === "number" && { utilization: normalizeUtilization(info.utilization) }),
+    ...(typeof info.resetsAt === "number" && { resetsAt: resetsAtIso(info.resetsAt) }),
+  };
 }
 
 class InputQueue implements AsyncIterable<SDKUserMessage> {
@@ -113,11 +139,13 @@ class ClaudeSession implements AgentSession {
   private turnActive = false;
   private interrupting = false;
   private closed = false;
+  private costSoFar: number;
 
   constructor(
     driver: ClaudeDriverOptions,
     private readonly opts: DriverStartOptions,
   ) {
+    this.costSoFar = opts.resume ? (opts.priorCostUsd ?? 0) : 0;
     const mode = driver.permissionMode ?? "default";
     const append = [driver.appendSystemPrompt, opts.appendSystemPrompt].filter(Boolean).join("\n\n");
     const model = opts.model ?? driver.model;
@@ -205,18 +233,48 @@ class ClaudeSession implements AgentSession {
         this.turnActive = false;
         this.interrupting = false;
         this.titles.clear();
+        const usage = this.turnUsage(msg);
         if (msg.subtype === "success" && !msg.is_error) {
-          this.emit({ type: "turn_end", stopReason: "end_turn", result: msg.result });
+          this.emit({ type: "turn_end", stopReason: "end_turn", result: msg.result, ...usage });
           return;
         }
         const stopReason: StopReason = cancelled ? "cancelled" : "error";
         const detail = msg.subtype === "success" ? msg.result : msg.errors?.join("; ");
-        this.emit({ type: "turn_end", stopReason, ...(detail ? { result: detail } : {}) });
+        this.emit({ type: "turn_end", stopReason, ...(detail ? { result: detail } : {}), ...usage });
+        return;
+      }
+      case "rate_limit_event": {
+        const event = rateLimitEvent(msg.rate_limit_info);
+        if (event) this.emit(event);
         return;
       }
       default:
         return;
     }
+  }
+
+  /** total_cost_usd is cumulative for the conversation; usage is this turn's. */
+  private turnUsage(msg: SDKResultMessage): { costUsd?: number; tokens?: TokenUsage } {
+    const out: { costUsd?: number; tokens?: TokenUsage } = {};
+    const total = msg.total_cost_usd;
+    if (typeof total === "number" && Number.isFinite(total)) {
+      const delta = total >= this.costSoFar ? total - this.costSoFar : total;
+      this.costSoFar = total;
+      out.costUsd = Math.round(delta * 1e6) / 1e6;
+    }
+    const u = msg.usage as unknown as Record<string, unknown> | undefined;
+    const num = (k: string) => (typeof u?.[k] === "number" ? (u[k] as number) : undefined);
+    const input = num("input_tokens");
+    const output = num("output_tokens");
+    if (input !== undefined || output !== undefined) {
+      out.tokens = {
+        input: input ?? 0,
+        output: output ?? 0,
+        cacheRead: num("cache_read_input_tokens") ?? 0,
+        cacheWrite: num("cache_creation_input_tokens") ?? 0,
+      };
+    }
+    return out;
   }
 
   private canUseTool: CanUseTool = (tool, input, options) => {

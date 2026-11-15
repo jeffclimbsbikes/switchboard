@@ -1,6 +1,6 @@
 import type { Db } from "../db.js";
 import type { DriverEvent } from "../drivers/driver.js";
-import type { PendingRequest, SessionState } from "../types.js";
+import type { PendingRequest, SessionState, TokenUsage, UsageTotals } from "../types.js";
 
 export type StoredEventData = DriverEvent | { type: "prompt"; text: string } | { type: "note"; text: string };
 
@@ -18,6 +18,8 @@ export interface SessionRow {
   createdAt: string;
   updatedAt: string;
   lastActivity?: string;
+  /** Running totals; always set on rows read from the store. */
+  usage?: UsageTotals;
 }
 
 export interface SessionPatch {
@@ -66,7 +68,21 @@ export function migrate(db: Db): void {
   `);
   const columns = db.prepare("PRAGMA table_info(sessions)").all();
   if (!columns.some((c) => c.name === "owner")) db.exec("ALTER TABLE sessions ADD COLUMN owner TEXT");
+  for (const [column, type] of USAGE_COLUMNS) {
+    if (!columns.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN ${column} ${type} NOT NULL DEFAULT 0`);
+    }
+  }
 }
+
+const USAGE_COLUMNS = [
+  ["turns", "INTEGER"],
+  ["cost_usd", "REAL"],
+  ["tokens_input", "INTEGER"],
+  ["tokens_output", "INTEGER"],
+  ["tokens_cache_read", "INTEGER"],
+  ["tokens_cache_write", "INTEGER"],
+] as const;
 
 function toRow(r: Raw): SessionRow {
   return {
@@ -83,6 +99,14 @@ function toRow(r: Raw): SessionRow {
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
     ...(r.last_activity != null && { lastActivity: r.last_activity as string }),
+    usage: {
+      turns: r.turns as number,
+      costUsd: r.cost_usd as number,
+      input: r.tokens_input as number,
+      output: r.tokens_output as number,
+      cacheRead: r.tokens_cache_read as number,
+      cacheWrite: r.tokens_cache_write as number,
+    },
   };
 }
 
@@ -166,6 +190,18 @@ export class SessionStore {
     const row = this.get(name);
     if (!row) throw new Error(`no such session: ${name}`);
     return row;
+  }
+
+  /** Counts one finished turn and adds whatever cost and tokens the agent reported for it. */
+  addTurn(name: string, spent: { costUsd?: number; tokens?: TokenUsage }): void {
+    const t = spent.tokens;
+    this.db
+      .prepare(
+        `UPDATE sessions SET turns = turns + 1, cost_usd = cost_usd + ?, tokens_input = tokens_input + ?,
+         tokens_output = tokens_output + ?, tokens_cache_read = tokens_cache_read + ?,
+         tokens_cache_write = tokens_cache_write + ? WHERE name = ?`,
+      )
+      .run(spent.costUsd ?? 0, t?.input ?? 0, t?.output ?? 0, t?.cacheRead ?? 0, t?.cacheWrite ?? 0, name);
   }
 
   appendEvent(session: string, at: string, data: StoredEventData): number {

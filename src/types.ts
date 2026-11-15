@@ -65,11 +65,30 @@ export interface SessionSummary extends SessionView {
   pending?: PendingRequest;
 }
 
+export interface ModelInfo {
+  id: string;
+  label?: string;
+  description?: string;
+  /** USD per million tokens, list price for comparison. */
+  inputPrice?: number;
+  outputPrice?: number;
+  notes?: string;
+  default: boolean;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface AgentInfo {
   id: string;
   driver: "claude" | "acp" | "fake";
   model?: string;
   description?: string;
+  models?: ModelInfo[];
   default: boolean;
 }
 
@@ -80,7 +99,7 @@ export interface WorkspaceInfo {
   default: boolean;
 }
 
-export interface DashboardAgent extends AgentInfo {
+export interface DashboardAgent extends Omit<AgentInfo, "models"> {
   runAs?: string;
   live: number;
   liveSessions: string[];
@@ -97,9 +116,72 @@ export interface DashboardSession extends Omit<SessionView, "session"> {
   pending?: PendingRequest;
 }
 
+export type PlanStatus = "allowed" | "warning" | "rejected";
+
+export interface PlanWindow {
+  window: string;
+  label: string;
+  /** 0..1 */
+  utilization?: number;
+  resetsAt?: string;
+  status: PlanStatus;
+  seenAt: string;
+  source: "session" | "probe";
+}
+
+export interface ClaudePlan {
+  subscriptionType?: string;
+  windows: PlanWindow[];
+  lastSeenAt?: string;
+  source?: "session" | "probe";
+  /** The probe is enabled in the config. */
+  probe: boolean;
+  /** A probe found that plan limits do not apply (API key, Bedrock, ...). */
+  unavailable?: boolean;
+}
+
+export interface UsageTotals extends TokenUsage {
+  costUsd: number;
+  turns: number;
+}
+
+export interface AgentUsage {
+  agent: string;
+  driver: AgentInfo["driver"];
+  today: UsageTotals;
+  week: UsageTotals;
+  total: UsageTotals;
+}
+
+export interface SessionUsage {
+  name: string;
+  agent: string;
+  title: string;
+  today: UsageTotals;
+  week: UsageTotals;
+  total: UsageTotals;
+}
+
+export interface OllamaUsage {
+  plan?: string;
+  days: { date: string; requests: number }[];
+  totalRequests?: number;
+  fetchedAt?: string;
+  error?: string;
+}
+
+export interface UsageSnapshot {
+  claude?: ClaudePlan;
+  ollama?: OllamaUsage;
+  agents: AgentUsage[];
+  sessions: SessionUsage[];
+}
+
 export interface DashboardSnapshot {
   viewer: { email?: string; restricted: boolean };
   agents: DashboardAgent[];
+  catalog: Record<string, ModelInfo[]>;
+  usage: UsageSnapshot;
   workspaces: WorkspaceInfo[];
   sessions: DashboardSession[];
   counts: { total: number; live: number; maxLive: number; byState: Record<SessionState, number> };

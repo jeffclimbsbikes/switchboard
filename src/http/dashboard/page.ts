@@ -159,6 +159,23 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
 .plan{margin:2px 0 0;padding:0;list-style:none;font-size:.88rem}
 .plan li::before{content:"○ ";color:var(--dim)}.plan li.completed::before{content:"● ";color:var(--idle)}.plan li.in_progress::before{content:"◐ ";color:var(--working)}
 .note{color:var(--muted);font-size:.82rem;margin:8px 0}
+.gauge{margin:10px 0 0}
+.gauge .gh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.gauge .gl{font-weight:600}
+.gauge .gp{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.gauge .gs{font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.gauge .gs.allowed{color:var(--idle)}.gauge .gs.warning{color:var(--waiting)}.gauge .gs.rejected{color:var(--failed)}
+.track{height:10px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;margin-top:6px}
+.track i{display:block;height:100%;background:var(--idle);border-radius:999px}
+.track i.warning{background:var(--waiting)}.track i.rejected{background:var(--failed)}
+.bars{display:flex;align-items:flex-end;gap:8px;height:110px;margin-top:12px}
+.bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}
+.bar i{display:block;width:100%;background:var(--working);border-radius:4px 4px 0 0;min-height:2px}
+.bar b{font-size:.72rem;font-weight:500;font-family:var(--mono);margin-bottom:2px}
+.bar span{font-size:.68rem;color:var(--muted);margin-top:4px;font-family:var(--mono)}
+.b-exp{color:var(--waiting);border-color:rgba(245,165,36,.4)}
+.mdl{padding:10px 0;border-top:1px solid var(--line)}
+a.ext{color:var(--working)}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
@@ -201,7 +218,7 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
     { id: "failed", label: "Failed", states: ["failed"] },
     { id: "closed", label: "Closed", states: ["closed"] }
   ];
-  var TABS = [["overview", "Overview"], ["tools", "Tools"], ["connections", "Connections"]];
+  var TABS = [["overview", "Overview"], ["usage", "Usage"], ["models", "Models"], ["tools", "Tools"], ["connections", "Connections"]];
 
   var state = null;
   var mcp = null;
@@ -471,6 +488,147 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
       h("thead", null, h("tr", null, ["Param", "Type", "Required", "Constraints", "Description"].map(function (x) { return h("th", null, x); }))), body);
   }
 
+  function money(n) {
+    if (!n) return "$0";
+    return "$" + (n >= 100 ? n.toFixed(0) : n >= 1 ? n.toFixed(2) : n.toFixed(3));
+  }
+  function compact(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+    return String(n);
+  }
+  function pct(u) { return Math.round(u * 100) + "%"; }
+  function tokenLine(t) {
+    return t.input || t.output ? compact(t.input) + " in / " + compact(t.output) + " out" : "";
+  }
+  function totalsCell(label, t) {
+    var tokens = tokenLine(t);
+    return h("td", { "data-l": label },
+      t.costUsd > 0 ? h("b", null, money(t.costUsd)) : (t.turns > 0 || tokens ? "—" : "·"),
+      tokens ? h("div", { class: "sub mono" }, tokens) : null);
+  }
+
+  function gauge(w) {
+    var u = w.utilization;
+    return h("div", { class: "gauge" },
+      h("div", { class: "gh" },
+        h("span", { class: "gl" }, w.label),
+        h("span", { class: "gp" }, u === undefined ? "—" : pct(u)),
+        h("span", { class: "gs " + w.status }, w.status),
+        h("span", { class: "sp" }),
+        w.resetsAt ? h("span", { class: "sub", title: fullTime(w.resetsAt) }, "resets " + until(w.resetsAt)) : null),
+      h("div", { class: "track", role: "img", "aria-label": w.label + " " + (u === undefined ? "unknown" : pct(u)) },
+        h("i", { class: w.status, style: "width:" + Math.min(100, Math.round((u || 0) * 100)) + "%" })));
+  }
+
+  function renderClaudePlan(root, c) {
+    root.appendChild(h("h2", null, "Claude plan",
+      c.source === "probe" || c.probe ? h("span", { class: "badge b-exp", title: "uses an experimental SDK call" }, "experimental") : null));
+    var card = h("div", { class: "card" });
+    card.appendChild(h("div", { class: "row" },
+      c.subscriptionType ? h("span", { class: "badge drv-claude" }, c.subscriptionType) : h("span", { class: "sub" }, "plan type unknown"),
+      h("span", { class: "sp" }),
+      c.lastSeenAt ? h("span", { class: "sub", title: fullTime(c.lastSeenAt) },
+        "last seen " + ago(c.lastSeenAt) + " · " + (c.source === "probe" ? "probe (experimental)" : "live session")) : null));
+    if (c.windows.length) c.windows.forEach(function (w) { card.appendChild(gauge(w)); });
+    else {
+      card.appendChild(h("p", { class: "desc" }, c.unavailable
+        ? "Plan limits do not apply to this account (API key or third-party provider)."
+        : "No plan data yet. It appears once a Claude session reports its limits" +
+          (c.probe ? ", or when the experimental probe next runs." : "; set [usage.claude] probe = true to fetch it on demand (experimental).")));
+    }
+    root.appendChild(card);
+  }
+
+  function renderCost(root, u) {
+    root.appendChild(h("h2", null, "Cost"));
+    var hasClaude = u.agents.some(function (a) { return a.driver === "claude"; });
+    if (hasClaude) root.appendChild(h("p", { class: "note" }, "API-equivalent cost (subscription usage, not a bill). Other agents show the cost they report, if any."));
+    var head = function (cols) { return h("thead", null, h("tr", null, cols.map(function (x) { return h("th", null, x); }))); };
+    var body = h("tbody");
+    u.agents.forEach(function (a) {
+      body.appendChild(h("tr", null,
+        h("td", { "data-l": "agent" }, agentBadge(a.agent)),
+        totalsCell("today", a.today), totalsCell("7 days", a.week), totalsCell("all time", a.total)));
+    });
+    root.appendChild(h("div", { class: "card" }, h("table", { class: "plain" }, head(["Agent", "Today", "7 days", "All time"]), body)));
+    if (!u.sessions.length) return;
+    root.appendChild(h("h2", null, "Sessions", h("span", { class: "count" }, u.sessions.length)));
+    var sb = h("tbody");
+    u.sessions.forEach(function (s) {
+      sb.appendChild(h("tr", null,
+        h("td", { "data-l": "session" },
+          h("a", { class: "name ext", href: "#session/" + encodeURIComponent(s.name) }, s.name),
+          h("div", { class: "sub" }, s.title)),
+        h("td", { "data-l": "agent" }, agentBadge(s.agent)),
+        totalsCell("today", s.today), totalsCell("7 days", s.week), totalsCell("all time", s.total)));
+    });
+    root.appendChild(h("div", { class: "card" }, h("table", { class: "plain" }, head(["Session", "Agent", "Today", "7 days", "All time"]), sb)));
+  }
+
+  function renderOllama(root, o) {
+    root.appendChild(h("h2", null, "Ollama",
+      h("span", { class: "badge b-exp", title: "ollama.com/api/me and /api/usage are undocumented and may change" }, "undocumented API")));
+    var card = h("div", { class: "card" });
+    card.appendChild(h("div", { class: "row" },
+      o.plan ? h("span", { class: "badge drv-acp" }, o.plan) : h("span", { class: "sub" }, "plan unknown"),
+      o.totalRequests !== undefined ? h("span", null, h("b", null, o.totalRequests), " requests in 7 days") : null,
+      h("span", { class: "sp" }),
+      o.fetchedAt ? h("span", { class: "sub", title: fullTime(o.fetchedAt) }, "fetched " + ago(o.fetchedAt)) : h("span", { class: "sub" }, "not fetched yet")));
+    if (o.days.length) {
+      var max = Math.max.apply(null, o.days.map(function (d) { return d.requests; }).concat([1]));
+      card.appendChild(h("div", { class: "bars" }, o.days.map(function (d) {
+        return h("div", { class: "bar", title: d.date + ": " + d.requests + " requests" },
+          h("b", null, d.requests), h("i", { style: "height:" + Math.max(2, Math.round(d.requests / max * 70)) + "px" }), h("span", null, d.date.slice(5)));
+      })));
+    }
+    if (o.error) card.appendChild(h("p", { class: "note" }, "Could not refresh: " + o.error));
+    card.appendChild(h("p", { class: "note" }, "Quota percentage is not available via the API. ",
+      h("a", { class: "ext", href: "https://ollama.com/settings", target: "_blank", rel: "noopener noreferrer" }, "Open ollama.com/settings")));
+    root.appendChild(card);
+  }
+
+  function renderUsage(root) {
+    var u = state.usage;
+    if (u.claude) renderClaudePlan(root, u.claude);
+    renderCost(root, u);
+    if (u.ollama) renderOllama(root, u.ollama);
+  }
+
+  function priceText(m) {
+    if (m.inputPrice === undefined && m.outputPrice === undefined) return "price not published";
+    var f = function (n) { return n === undefined ? "?" : "$" + Number(n.toFixed(4)); };
+    return f(m.inputPrice) + " in / " + f(m.outputPrice) + " out per M tokens";
+  }
+
+  function renderModels(root) {
+    var ids = Object.keys(state.catalog);
+    root.appendChild(h("p", { class: "note" }, "Prices are list prices per million tokens, for comparison only."));
+    if (!ids.length) {
+      root.appendChild(h("div", { class: "empty" }, "No model catalogs configured. Add [[agents.<id>.models]] entries to choose models per agent."));
+      return;
+    }
+    state.agents.forEach(function (a) {
+      var list = state.catalog[a.id];
+      if (!list) return;
+      var card = h("div", { class: "card", style: "margin-bottom:10px" },
+        h("div", { class: "row" }, h("span", { class: "name" }, a.id), h("span", { class: "badge drv-" + a.driver }, a.driver),
+          h("span", { class: "sp" }), h("span", { class: "sub" }, plural(list.length, "model"))));
+      list.forEach(function (m) {
+        card.appendChild(h("div", { class: "mdl" },
+          h("div", { class: "row" },
+            h("code", null, m.id),
+            m.label ? h("span", null, m.label) : null,
+            m.default ? h("span", { class: "badge b-default" }, "default") : null,
+            h("span", { class: "sp" }),
+            h("span", { class: "sub mono" }, priceText(m))),
+          m.description ? h("p", { class: "desc" }, m.description) : null,
+          m.notes ? h("p", { class: "note", style: "margin:4px 0 0" }, m.notes) : null));
+      });
+      root.appendChild(card);
+    });
+  }
+
   function renderTools(root) {
     if (!mcp) {
       root.appendChild(h("div", { class: "empty" }, mcpError ? "Could not read the tool contract: " + mcpError : "Loading the tool contract…"));
@@ -551,7 +709,7 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
 
   function render() {
     if (!state) return;
-    var key = JSON.stringify([state.sessions, state.agents, state.workspaces, state.counts, state.grants, state.config, state.version, tab, rawTools, !!mcp, mcpError]) + Math.floor(nowMs() / 30000);
+    var key = JSON.stringify([state.sessions, state.agents, state.workspaces, state.counts, state.grants, state.config, state.version, state.usage, state.catalog, tab, rawTools, !!mcp, mcpError]) + Math.floor(nowMs() / 30000);
     renderHeader();
     if (key === lastKey) return;
     lastKey = key;
@@ -559,6 +717,8 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
     renderKpis();
     var main = clear($("main"));
     if (tab === "overview") renderOverview(main);
+    else if (tab === "usage") renderUsage(main);
+    else if (tab === "models") renderModels(main);
     else if (tab === "tools") renderTools(main);
     else renderConnections(main);
   }
@@ -619,7 +779,11 @@ left:0;right:0;bottom:0;height:90vh;height:90dvh;border-radius:16px 16px 0 0;tra
         body = h("ul", { class: "plan eb" }, ev.entries.map(function (p) { return h("li", { class: p.status }, p.content); }));
         break;
       case "request": body = h("div", { class: "eb" }, pendingBlock(ev.request, false)); break;
-      case "turn_end": body = h("div", { class: "eb" }, ev.stopReason); break;
+      case "turn_end":
+        body = h("div", { class: "eb" }, ev.stopReason +
+          (ev.costUsd !== undefined ? " · " + money(ev.costUsd) : "") +
+          (ev.tokens ? " · " + tokenLine(ev.tokens) : ""));
+        break;
       case "error": body = h("div", { class: "eb" }, (ev.fatal ? "fatal: " : "") + ev.message); break;
       case "session": body = h("div", { class: "eb mono" }, "agent session " + ev.agentSessionId); break;
       default: body = h("div", { class: "eb" }, ev.text || JSON.stringify(ev));

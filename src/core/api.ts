@@ -39,6 +39,8 @@ export interface SessionManagerApi {
    */
   wait(session: string, opts?: { cursor?: number; maxWaitMs?: number }, caller?: Caller): Promise<WaitResult>;
   list(filter?: { state?: SessionState }, caller?: Caller): SessionSummary[];
+  /** One line about plan usage for the agents the caller can use, when known. */
+  usageHint?(caller?: Caller): string | undefined;
   stop(session: string, mode: "interrupt" | "close", caller?: Caller): Promise<SessionView>;
   shutdown(): Promise<void>;
 }
@@ -46,6 +48,8 @@ export interface SessionManagerApi {
 /** Read-only views for the dashboard; honours the same access policy as the tools. */
 export interface DashboardApi {
   snapshot(caller?: Caller): DashboardSnapshot;
+  /** Starts a background refresh of stale plan usage; returns immediately. */
+  touchUsage?(): void;
   /** Without `since`: the newest `limit` events. With it: events after that seq, oldest first. */
   detail(session: string, opts?: { since?: number; limit?: number }, caller?: Caller): DashboardSessionDetail;
 }

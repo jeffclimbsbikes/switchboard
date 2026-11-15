@@ -37,6 +37,7 @@ let inited = false;
 const initOnce = () => {
   if (inited) return;
   inited = true;
+  record("init", { model });
   send({
     type: "system",
     subtype: "init",
@@ -60,7 +61,28 @@ const toolResult = (tool_use_id, content, is_error = false) =>
     message: { role: "user", content: [{ type: "tool_result", tool_use_id, content, is_error }] },
     parent_tool_use_id: null,
   });
-const result = (text) =>
+const costFile = join(stateDir, `${sessionId}.cost`);
+const addCost = (usd) => {
+  let total = 0;
+  try {
+    total = Number(readFileSync(costFile, "utf8"));
+  } catch {}
+  total += usd;
+  writeFileSync(costFile, String(total));
+  return total;
+};
+const rateLimit = () =>
+  send({
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "allowed_warning",
+      rateLimitType: "five_hour",
+      utilization: 0.42,
+      resetsAt: Math.floor(Date.now() / 1000) + 3600,
+    },
+  });
+const result = (text) => {
+  rateLimit();
   send({
     type: "result",
     subtype: "success",
@@ -70,11 +92,17 @@ const result = (text) =>
     duration_ms: 1,
     duration_api_ms: 1,
     num_turns: 1,
-    total_cost_usd: 0,
-    usage: {},
+    total_cost_usd: addCost(0.25),
+    usage: {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_read_input_tokens: 50,
+      cache_creation_input_tokens: 10,
+    },
     modelUsage: {},
     permission_denials: [],
   });
+};
 const sayAndEnd = (text) => {
   assistant([{ type: "text", text }]);
   result(text);
@@ -208,6 +236,26 @@ rl.on("line", (line) => {
     if (sub === "interrupt") {
       abortTurn?.();
       return controlOk(msg.request_id);
+    }
+    if (sub === "get_usage") {
+      return controlOk(msg.request_id, {
+        session: {
+          total_cost_usd: 0,
+          total_api_duration_ms: 0,
+          total_duration_ms: 0,
+          total_lines_added: 0,
+          total_lines_removed: 0,
+          model_usage: {},
+        },
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: {
+          five_hour: { utilization: 34, resets_at: new Date(Date.now() + 3_600_000).toISOString() },
+          seven_day: { utilization: 61, resets_at: new Date(Date.now() + 86_400_000).toISOString() },
+          seven_day_opus: null,
+        },
+        behaviors: null,
+      });
     }
     return controlOk(msg.request_id, sub === "initialize" ? { commands: [], models: [] } : {});
   }

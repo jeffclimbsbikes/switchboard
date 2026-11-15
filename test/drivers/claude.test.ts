@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ClaudeDriver, type ClaudeDriverOptions } from "../../src/drivers/claude.js";
+import { ClaudeDriver, type ClaudeDriverOptions, rateLimitEvent } from "../../src/drivers/claude.js";
+import { probeClaudeUsage } from "../../src/drivers/claude-usage.js";
 import type { DriverEvent } from "../../src/drivers/driver.js";
 import { type ContractHarness, Recorder, runDriverContract } from "../contract/driver-contract.js";
 
@@ -136,6 +137,112 @@ describe("ClaudeDriver specifics", () => {
     await s.interrupt();
     await rec.waitFor(isTurnEnd);
     await s.close();
+    await h.cleanup();
+  });
+});
+
+describe("ClaudeDriver models and usage", () => {
+  const init = (state: string) =>
+    readFileSync(join(state, "log.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.kind === "init");
+
+  it("passes the per-session model to the SDK, overriding the driver default", async () => {
+    const h = harness({ model: "sonnet" });
+    const rec = new Recorder();
+    const s = await h.driver.start({ cwd: h.cwd, model: "opus", onEvent: rec.push });
+    await s.prompt("reply hi");
+    await rec.waitFor(isTurnEnd);
+    expect(init(h.state).map((e) => e.model)).toEqual(["opus"]);
+    await s.close();
+    const other = await h.driver.start({ cwd: h.cwd, onEvent: rec.push });
+    await other.prompt("reply hi");
+    await rec.waitFor(() => rec.events.filter(isTurnEnd).length === 2);
+    expect(init(h.state).map((e) => e.model)).toEqual(["opus", "sonnet"]);
+    await other.close();
+    await h.cleanup();
+  });
+
+  it("reports each turn's own cost and tokens, not the running total", async () => {
+    const h = harness();
+    const rec = new Recorder();
+    const s = await h.driver.start({ cwd: h.cwd, onEvent: rec.push });
+    await s.prompt("reply one");
+    await rec.waitFor(isTurnEnd);
+    await s.prompt("reply two");
+    await rec.waitFor(() => rec.events.filter(isTurnEnd).length === 2);
+    const ends = rec.events.filter(isTurnEnd);
+    expect(ends.map((e) => e.costUsd)).toEqual([0.25, 0.25]);
+    expect(ends[0]?.tokens).toEqual({ input: 100, output: 20, cacheRead: 50, cacheWrite: 10 });
+    await s.close();
+    await h.cleanup();
+  });
+
+  it("subtracts the cost a resumed conversation already carries", async () => {
+    const h = harness();
+    const rec = new Recorder();
+    const first = await h.driver.start({ cwd: h.cwd, onEvent: rec.push });
+    await first.prompt("reply one");
+    await rec.waitFor(isTurnEnd);
+    const sid = rec.events.find((e) => e.type === "session");
+    if (sid?.type !== "session") throw new Error("no session event");
+    await first.close();
+
+    const again = new Recorder();
+    const resumed = await h.driver.start({
+      cwd: h.cwd,
+      resume: sid.agentSessionId,
+      priorCostUsd: 0.25,
+      onEvent: again.push,
+    });
+    await resumed.prompt("reply two");
+    expect((await again.waitFor(isTurnEnd)).costUsd).toBe(0.25);
+    await resumed.close();
+    await h.cleanup();
+  });
+
+  it("turns SDK rate limit events into rate_limit events", async () => {
+    const h = harness();
+    const rec = new Recorder();
+    const s = await h.driver.start({ cwd: h.cwd, onEvent: rec.push });
+    await s.prompt("reply hi");
+    await rec.waitFor(isTurnEnd);
+    const limit = rec.events.find((e) => e.type === "rate_limit");
+    expect(limit).toMatchObject({
+      type: "rate_limit",
+      provider: "claude",
+      window: "five_hour",
+      utilization: 0.42,
+      status: "warning",
+    });
+    if (limit?.type !== "rate_limit") throw new Error("no rate_limit");
+    expect(Date.parse(limit.resetsAt ?? "")).toBeGreaterThan(Date.now());
+    await s.close();
+    await h.cleanup();
+  });
+
+  it("maps rate limit info edge cases", () => {
+    expect(rateLimitEvent({ status: "rejected", rateLimitType: "seven_day", utilization: 100 })).toEqual({
+      type: "rate_limit",
+      provider: "claude",
+      window: "seven_day",
+      status: "rejected",
+      utilization: 1,
+    });
+    expect(rateLimitEvent({ status: "allowed" })).toBeUndefined();
+  });
+
+  it("probes plan usage through the experimental request without sending a prompt", async () => {
+    const h = harness();
+    const probe = await probeClaudeUsage({ executable: fake, env: { FAKE_CLAUDE_STATE: h.state } });
+    expect(probe).toMatchObject({ available: true, subscriptionType: "max" });
+    expect(probe.windows.map((w) => [w.window, w.utilization])).toEqual([
+      ["five_hour", 0.34],
+      ["seven_day", 0.61],
+    ]);
+    expect(() => readFileSync(join(h.state, "log.jsonl"), "utf8")).toThrow();
     await h.cleanup();
   });
 });

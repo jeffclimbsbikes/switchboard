@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Caller, SessionManagerApi } from "../core/api.js";
 import { SwitchboardError } from "../core/api.js";
-import type { PendingRequest, SessionState, SessionView, WaitResult } from "../types.js";
+import type { ModelInfo, PendingRequest, SessionState, SessionView, WaitResult } from "../types.js";
 
 export const VERSION = "0.1.0";
 
@@ -58,6 +58,21 @@ export function nextStep(
     case "closed":
       return "The session is closed. Start a new one for more work.";
   }
+}
+
+const money = (n: number) => `$${Number(n.toFixed(4))}`;
+
+function describeModel(m: ModelInfo): string {
+  const text = [m.label, m.description].filter(Boolean).join(": ");
+  const price =
+    m.inputPrice !== undefined && m.outputPrice !== undefined
+      ? ` (in/out ${money(m.inputPrice)}/${money(m.outputPrice)} per M)`
+      : m.inputPrice !== undefined
+        ? ` (in ${money(m.inputPrice)} per M)`
+        : m.outputPrice !== undefined
+          ? ` (out ${money(m.outputPrice)} per M)`
+          : "";
+  return `  · ${m.id}${text ? ` — ${text}` : ""}${price}${m.default ? " (default)" : ""}`;
 }
 
 function result(text: string, data: Record<string, unknown>) {
@@ -151,14 +166,16 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       const workspaces = manager.workspaces(caller);
       const line = (id: string, isDefault: boolean, description?: string, detail?: string) =>
         `${id}${isDefault ? " (default)" : ""}${description ? ` — ${description}` : ""}${detail ? ` · ${detail}` : ""}`;
-      const agentLines = agents.map((a) =>
+      const agentLines = agents.flatMap((a) => [
         line(a.id, a.default, a.description, a.model ? `model ${a.model}` : undefined),
-      );
+        ...(a.models ?? []).map(describeModel),
+      ]);
       const workspaceLines = workspaces.map((w) => line(w.id, w.default, w.description, w.path));
-      return result(`Agents:\n${agentLines.join("\n")}\n\nWorkspaces:\n${workspaceLines.join("\n")}`, {
-        agents,
-        workspaces,
-      });
+      const usage = manager.usageHint?.(caller);
+      return result(
+        `Agents:\n${agentLines.join("\n")}\n\nWorkspaces:\n${workspaceLines.join("\n")}${usage ? `\n\n${usage}` : ""}`,
+        { agents, workspaces, ...(usage ? { usage } : {}) },
+      );
     }),
   );
 
@@ -172,7 +189,7 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
         prompt: z.string().min(1).describe("The task, in plain words, with any context that helps."),
         agent: z.string().optional().describe("Agent id from the agents tool (default if omitted)."),
         workspace: z.string().optional().describe("Workspace id from the agents tool (default if omitted)."),
-        model: z.string().optional().describe("Model override, e.g. opus or sonnet."),
+        model: z.string().optional().describe("Model id from the agents tool for the chosen agent."),
         title: z.string().optional().describe("Short title for the session list."),
       },
     },

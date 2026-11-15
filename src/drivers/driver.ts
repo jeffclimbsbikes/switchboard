@@ -1,4 +1,4 @@
-import type { Answer, PendingRequest, StopReason } from "../types.js";
+import type { Answer, PendingRequest, StopReason, TokenUsage } from "../types.js";
 
 /**
  * Everything a driver reports about one live agent session. Drivers translate
@@ -15,7 +15,16 @@ export type DriverEvent =
   /** The agent is blocked until `respond(request.id, answer)` is called. */
   | { type: "request"; request: PendingRequest }
   /** The current turn finished. `result` is the final assistant text, when the agent provides one. */
-  | { type: "turn_end"; stopReason: StopReason; result?: string }
+  | { type: "turn_end"; stopReason: StopReason; result?: string; costUsd?: number; tokens?: TokenUsage }
+  /** A subscription plan window changed. `utilization` is 0..1, `resetsAt` an ISO timestamp. */
+  | {
+      type: "rate_limit";
+      provider: "claude";
+      window: string;
+      utilization?: number;
+      resetsAt?: string;
+      status: "allowed" | "warning" | "rejected";
+    }
   /** `fatal: true` means the process is gone; the session can only continue via a resumed start(). */
   | { type: "error"; message: string; fatal: boolean };
 
@@ -25,6 +34,8 @@ export interface DriverStartOptions {
   model?: string;
   /** Agent session id from an earlier `session` event: continue that conversation. */
   resume?: string;
+  /** With `resume`: the cost already accumulated by that conversation, so a turn's cost is only its own. */
+  priorCostUsd?: number;
   /** Extra system prompt appended to the agent's own. */
   appendSystemPrompt?: string;
   onEvent: (event: DriverEvent) => void;

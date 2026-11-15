@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { defaultAgentId, parseConfig, parseDuration, workspaces } from "../src/config.js";
+import {
+  type AgentConfig,
+  agentDefaultModel,
+  agentModels,
+  defaultAgentId,
+  parseConfig,
+  parseDuration,
+  workspaces,
+} from "../src/config.js";
 
 const minimal = {
   agents: { claude: { driver: "claude" } },
@@ -70,5 +78,48 @@ describe("config", () => {
     expect(() =>
       parseConfig({ ...minimal, auth: { login: "cloudflare-access", team: "t", aud: "a", allow: ["nope"] } }),
     ).toThrow(/auth.allow/);
+  });
+});
+
+describe("model catalog and usage config", () => {
+  const withModels = (models: unknown, extra: Record<string, unknown> = {}) =>
+    parseConfig({
+      ...minimal,
+      agents: { oc: { driver: "acp", command: ["opencode", "acp"], models, ...extra } },
+    });
+
+  it("parses catalog entries with prices and notes", () => {
+    const c = withModels([
+      { id: "ollama-cloud/kimi-k3.1-pro", label: "Kimi", input_price: 0.6, output_price: 2.5, default: true },
+      { id: "ollama-cloud/glm-5.3", notes: "fast" },
+    ]);
+    expect(agentModels(c.agents.oc as AgentConfig)).toEqual([
+      { id: "ollama-cloud/kimi-k3.1-pro", label: "Kimi", inputPrice: 0.6, outputPrice: 2.5, default: true },
+      { id: "ollama-cloud/glm-5.3", notes: "fast", default: false },
+    ]);
+  });
+
+  it("rejects duplicate ids, two defaults and negative prices", () => {
+    expect(() => withModels([{ id: "a" }, { id: "a" }])).toThrow(/duplicate model "a"/);
+    expect(() =>
+      withModels([
+        { id: "a", default: true },
+        { id: "b", default: true },
+      ]),
+    ).toThrow(/at most one model/);
+    expect(() => withModels([{ id: "a", input_price: -1 }])).toThrow(/input_price/);
+  });
+
+  it("lets the agent's own model win over the catalog default", () => {
+    const catalog = [{ id: "a" }, { id: "b", default: true }];
+    expect(agentDefaultModel(withModels(catalog).agents.oc as AgentConfig)).toBe("b");
+    expect(agentDefaultModel(withModels(catalog, { model: "a" }).agents.oc as AgentConfig)).toBe("a");
+    expect(agentDefaultModel(withModels(undefined).agents.oc as AgentConfig)).toBeUndefined();
+  });
+
+  it("defaults usage to nothing and fills the Ollama key variable", () => {
+    expect(parseConfig(minimal).usage).toEqual({});
+    const c = parseConfig({ ...minimal, usage: { ollama: {}, claude: { probe: true } } });
+    expect(c.usage).toEqual({ ollama: { api_key_env: "OLLAMA_API_KEY" }, claude: { probe: true } });
   });
 });

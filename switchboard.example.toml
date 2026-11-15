@@ -21,6 +21,12 @@ permission_mode = "default"            # or acceptEdits, plan, bypassPermissions
 # driver = "acp"
 # command = ["opencode", "acp"]
 # description = "Fast and cheap; good for small edits."
+# Optional model catalog: start({ model }) must be one of these ids. Prices are USD per million tokens
+# (list price, for comparison). At most one default; an agent-level `model` wins over it when set.
+# models = [
+#   { id = "ollama-cloud/kimi-k3.1-pro", label = "Kimi K3.1 Pro", description = "Strong and cheap.", input_price = 0.6, output_price = 2.5, default = true },
+#   { id = "ollama-cloud/glm-5.3", notes = "Fast for small edits." },
+# ]
 
 [workspaces]
 home = "~/src/my-project"
@@ -39,6 +45,12 @@ home = "~/src/my-project"
 # team = "your-team"            # <team>.cloudflareaccess.com
 # aud = "…"                     # the Access application's AUD tag for /authorize
 # allow = ["you@example.com"]
+
+# Plan usage in the dashboard's Usage tab. Both are optional and fail soft.
+# [usage.ollama]                         # undocumented ollama.com/api/me + /api/usage, polled every 10 min
+# api_key_env = "OLLAMA_API_KEY"
+# [usage.claude]
+# probe = true                           # EXPERIMENTAL: read plan windows through the SDK when no live data is fresh
 
 # [notify]
 # telegram = { token_env = "TELEGRAM_BOT_TOKEN", chat = "123456789" }

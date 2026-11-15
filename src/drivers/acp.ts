@@ -73,6 +73,8 @@ class AcpSession implements AgentSession {
   private nextId = 0;
   private chunks = "";
   private turnText: string[] = [];
+  private cost: number | undefined;
+  private turnStartCost: number | undefined;
   private tools = new Map<string, { title: string; status: ToolStatus }>();
   private pending = new Map<string, Pending>();
   private exited: Promise<void>;
@@ -89,6 +91,7 @@ class AcpSession implements AgentSession {
           { cwd: start.cwd, command: cmd, args, env: opts.env ?? {} },
         )
       : { command: cmd, args };
+    this.cost = start.resume ? undefined : 0;
     this.child = spawn(inv.command, inv.args, {
       cwd: opts.runAs ? "/" : start.cwd,
       env: { ...process.env, ...opts.env },
@@ -180,17 +183,24 @@ class AcpSession implements AgentSession {
     const option = configOptions?.find(
       (o) => o.type === "select" && (o.category === "model" || o.id === "model"),
     );
-    if (option?.type !== "select") return;
+    if (option?.type !== "select") return this.modelNotApplied(wanted, "the agent has no model option");
     const choices = option.options.flatMap((o) => ("options" in o ? o.options : [o]));
     const match = choices.find((c) => c.value === wanted) ?? choices.find((c) => c.name === wanted);
-    if (!match || match.value === option.currentValue) return;
+    if (!match) return this.modelNotApplied(wanted, "the agent does not offer it");
+    if (match.value === option.currentValue) return;
     try {
       await this.conn.agent.request(acp.methods.agent.session.setConfigOption, {
         sessionId: this.sessionId,
         configId: option.id,
         value: match.value,
       });
-    } catch {}
+    } catch (err) {
+      this.modelNotApplied(wanted, err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  private modelNotApplied(model: string, why: string): void {
+    this.emit({ type: "error", message: `model ${model} was not applied: ${why}`, fatal: false });
   }
 
   private emit(event: DriverEvent): void {
@@ -222,6 +232,9 @@ class AcpSession implements AgentSession {
         this.tool(u.toolCallId, u.title ?? known?.title ?? u.toolCallId, u.status ?? null);
         break;
       }
+      case "usage_update":
+        if (u.cost?.currency === "USD" && Number.isFinite(u.cost.amount)) this.cost = u.cost.amount;
+        break;
       case "plan":
         this.emit({
           type: "plan",
@@ -291,6 +304,7 @@ class AcpSession implements AgentSession {
     if (this.turnActive) throw new Error("a turn is already running");
     this.turnActive = true;
     this.turnText = [];
+    this.turnStartCost = this.cost;
     this.conn.agent
       .request(acp.methods.agent.session.prompt, {
         sessionId: this.sessionId as string,
@@ -301,10 +315,15 @@ class AcpSession implements AgentSession {
           this.flushText();
           const result = this.turnText.join("\n\n");
           this.turnActive = false;
+          const spent =
+            this.cost !== undefined && this.turnStartCost !== undefined
+              ? Math.round((this.cost - this.turnStartCost) * 1e6) / 1e6
+              : 0;
           this.emit({
             type: "turn_end",
             stopReason: STOP_REASONS[res.stopReason] ?? "end_turn",
             ...(result ? { result } : {}),
+            ...(spent > 0 ? { costUsd: spent } : {}),
           });
         },
         (err: unknown) => {

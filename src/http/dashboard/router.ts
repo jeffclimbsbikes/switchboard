@@ -86,6 +86,7 @@ export function dashboardRouter(deps: DashboardDeps): Router {
 
   router.get("/dashboard/api/state", async (req: Request, res: Response) => {
     const caller = callerOf(res);
+    dashboard.touchUsage?.();
     const snapshot = dashboard.snapshot(caller);
     const { restricted } = snapshot.viewer;
     const withTools = req.query.tools !== "0";

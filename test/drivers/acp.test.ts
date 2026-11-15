@@ -79,6 +79,49 @@ describe("acp driver specifics", () => {
     expect(JSON.parse(readFileSync(log, "utf8").trim())).toEqual({ configId: "model", value: "fake-large" });
   });
 
+  it("applies a provider/model id the way opencode names its model values", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "fake-acp-"));
+    dirs.push(dir);
+    const log = join(dir, "models.log");
+    const { session, rec } = await open({
+      dir,
+      env: { FAKE_ACP_MODEL_LOG: log },
+    });
+    await session.close();
+    const again = new Recorder();
+    const driver = makeDriver("resume", join(dir, "state"), { FAKE_ACP_MODEL_LOG: log });
+    const chosen = await driver.start({ cwd: dir, model: "fake-cloud/kimi-k3.1-pro", onEvent: again.push });
+    sessions.push(chosen);
+    expect(
+      readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l)),
+    ).toEqual([{ configId: "model", value: "fake-cloud/kimi-k3.1-pro" }]);
+    expect(rec.events.some((e) => e.type === "error")).toBe(false);
+    expect(again.events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("says so when the requested model is not offered", async () => {
+    const { rec } = await open({ model: "fake-cloud/nope" });
+    expect(rec.events.find((e) => e.type === "error")).toEqual({
+      type: "error",
+      message: "model fake-cloud/nope was not applied: the agent does not offer it",
+      fatal: false,
+    });
+  });
+
+  it("reports each turn's USD cost from cumulative usage updates", async () => {
+    const { session, rec } = await open();
+    await session.prompt("spend 0.5");
+    await rec.waitFor(isTurnEnd);
+    await session.prompt("spend 0.25");
+    await rec.waitFor(() => rec.events.filter(isTurnEnd).length === 2);
+    await session.prompt("reply free");
+    await rec.waitFor(() => rec.events.filter(isTurnEnd).length === 3);
+    expect(rec.events.filter(isTurnEnd).map((e) => e.costUsd)).toEqual([0.5, 0.25, undefined]);
+  });
+
   it("ignores a model the agent does not offer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "fake-acp-"));
     dirs.push(dir);

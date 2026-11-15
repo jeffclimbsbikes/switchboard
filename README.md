@@ -75,6 +75,80 @@ site = { path = "~/src/site", description = "My website", default = true }
 scratch = "~/scratch"          # the plain path form still works
 ```
 
+## Models
+
+Give an agent a `models` catalog so the client can choose a model per session
+with the cost in view. Every field except `id` is optional:
+
+```toml
+[agents.opencode]
+driver = "acp"
+command = ["opencode", "acp"]
+models = [
+  { id = "ollama-cloud/kimi-k3.1-pro", label = "Kimi K3.1 Pro", description = "Strong and cheap.", input_price = 0.6, output_price = 2.5, default = true },
+  { id = "ollama-cloud/glm-5.3", notes = "Fast for small edits." },
+]
+```
+
+- `id` is what the agent itself expects: `provider/model` for OpenCode, `opus`
+  or `sonnet` for Claude Code.
+- Prices are USD per million tokens, list prices for comparison only; the
+  Models tab shows "price not published" when they are omitted.
+- At most one model is `default`. The agent's own top-level `model` wins when
+  it is set; the catalog default only applies when `model` is unset.
+- With a catalog, `start({ model })` must be one of its ids, otherwise the
+  error lists the options. Without a catalog the model string is passed
+  through as before.
+- The `agents` tool lists each agent's models, one per line, and the structured
+  result carries the whole catalog. `start`'s `model` is "model id from the
+  agents tool for the chosen agent".
+- Claude Code gets the model as the SDK `model` option. ACP agents get it
+  through the agent's model config option (`session/set_config_option`); if
+  the agent does not offer that id, the session records a non-fatal error
+  instead of silently running another model.
+
+## Usage
+
+The dashboard has a **Usage** tab (and a **Models** tab for the catalog).
+
+- **Cost.** Drivers report `costUsd` and token counts on each turn (Claude Code
+  from the result message, ACP agents from `usage_update` cost when they send
+  one). switchboard keeps per-session totals in its database plus a small
+  per-turn table for the today / 7 days figures. For Claude this is
+  API-equivalent cost on a subscription, not a bill.
+- **Claude plan windows.** Claude Code's `rate_limit_event` messages (5-hour,
+  7-day, 7-day Opus, ...) are stored process-wide with utilization, status and
+  reset time, and survive restarts.
+- **Optional pollers** (both off unless configured, both fail soft):
+
+```toml
+[usage.ollama]
+api_key_env = "OLLAMA_API_KEY"   # every 10 min and on demand, cached
+
+[usage.claude]
+probe = true                     # EXPERIMENTAL
+```
+
+`[usage.ollama]` reads `https://ollama.com/api/me` (only the `Plan` field is
+kept; email, name and ids are dropped) and `https://ollama.com/api/usage`
+(daily request counts for 7 days). Both endpoints are undocumented and may
+change; the UI says so. Ollama's quota percentage is not available through
+the API, so the tab links to ollama.com/settings.
+
+`[usage.claude] probe = true` fills the plan windows when no live
+`rate_limit_event` arrived in the last 15 minutes. It opens a short-lived SDK
+query with the first claude agent that has no `run_as`, calls the SDK's
+experimental usage request and closes it. It never sends a prompt, so it
+spends no tokens. It depends on an SDK method named
+`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`; any error is
+logged and ignored.
+
+The `agents` tool ends with a one-line hint when something is known, for
+example `Usage: Claude plan: 5-hour 34%, 7-day 61% (resets Tue); Ollama: Pro,
+412 requests this week`, so the client can steer toward a cheaper agent.
+Restricted users get the hint only for the providers their own agents use, and
+the dashboard shows them only their own sessions' cost.
+
 ## Remote: claude.ai as the client
 
 Run `switchboard serve` behind HTTPS and add `https://<host>/mcp` as a custom

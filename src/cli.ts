@@ -39,6 +39,7 @@ function boot(config: Config) {
     drivers: createDrivers(config),
     notifier: createNotifier(config.notify),
   });
+  manager.usage.start();
   return { db, manager };
 }
 
