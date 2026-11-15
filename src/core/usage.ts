@@ -102,7 +102,7 @@ export function parseOllamaUsage(
   const byDay = new Map<string, number>();
   for (const b of list.filter(isBucket)) {
     const key =
-      ["date", "day", "start", "start_time", "timestamp", "time", "period"]
+      ["from", "date", "day", "start", "start_time", "timestamp", "time", "period"]
         .map((k) => isoDay(b[k]))
         .find((d) => d !== undefined) ?? "";
     byDay.set(key, (byDay.get(key) ?? 0) + (b.request_count as number));
@@ -296,15 +296,16 @@ export class UsageService {
       this.ollamaState = { ...previous, error: `${keyEnv} is not set` };
       return;
     }
-    const get = async (path: string): Promise<unknown> => {
+    const get = async (path: string, method = "GET"): Promise<unknown> => {
       const res = await this.fetchFn(`${OLLAMA_BASE}${path}`, {
+        method,
         headers: { authorization: `Bearer ${key}`, accept: "application/json" },
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
       return res.json();
     };
-    const [me, usage] = await Promise.allSettled([get("/api/me"), get("/api/usage")]);
+    const [me, usage] = await Promise.allSettled([get("/api/me", "POST"), get("/api/usage")]);
     const errors: string[] = [];
     const next: OllamaUsage = { ...previous };
     delete next.error;

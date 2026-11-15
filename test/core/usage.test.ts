@@ -457,3 +457,20 @@ describe("Claude plan probe (experimental)", () => {
     expect(usage.claudePlan()).toEqual({ windows: [], probe: false });
   });
 });
+
+describe("ollama usage shape seen in production", () => {
+  it("reads daily buckets keyed by `from` and the totals", async () => {
+    const { parseOllamaUsage } = await import("../../src/core/usage.js");
+    const parsed = parseOllamaUsage({
+      range: "7d",
+      totals: { request_count: 2418 },
+      buckets: [
+        { from: "2026-11-08T00:00:00Z", until: "2026-11-09T00:00:00Z", request_count: 11 },
+        { from: "2026-11-14T00:00:00Z", until: "2026-11-15T00:00:00Z", request_count: 5 },
+        { from: "2026-11-15T00:00:00Z", until: "2026-11-15T04:13:35Z", partial: true, request_count: 2402 },
+      ],
+    });
+    expect(parsed?.days.map((d) => d.date)).toEqual(["2026-11-08", "2026-11-14", "2026-11-15"]);
+    expect(parsed?.totalRequests).toBe(2418);
+  });
+});
