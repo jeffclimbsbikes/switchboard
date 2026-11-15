@@ -58,6 +58,32 @@ describe("SessionManager lifecycle", () => {
     ]);
   });
 
+  it("includes descriptions, filtered by access", () => {
+    const { manager } = make({
+      agents: {
+        fake: { driver: "fake", description: "Quick" },
+        other: { driver: "fake" },
+      },
+      workspaces: { main: { path: "/tmp", description: "Main repo" }, side: "/var" },
+      users: { "a@x.com": { agents: ["fake"], workspaces: ["main"] } },
+    });
+    expect(manager.agents()).toEqual([
+      { id: "fake", driver: "fake", description: "Quick", default: true },
+      { id: "other", driver: "fake", default: false },
+    ]);
+    expect(manager.workspaces()[0]).toEqual({
+      id: "main",
+      path: "/tmp",
+      description: "Main repo",
+      default: true,
+    });
+    const caller = { email: "a@x.com" };
+    expect(manager.agents(caller).map((a) => a.id)).toEqual(["fake"]);
+    expect(manager.workspaces(caller)).toEqual([
+      { id: "main", path: "/tmp", description: "Main repo", default: true },
+    ]);
+  });
+
   it("runs a full conversation: reply, count, question, approval, interrupt, close", async () => {
     const { manager } = make();
     const view = await manager.start({ prompt: "reply hello there from the fake agent today" });

@@ -14,6 +14,7 @@ How to work with it:
 - When the agent asks a question or wants approval (state "waiting"), answer it yourself only if the user already told you the answer or it is clearly implied. Otherwise ask the user, briefly, reading the options, and pass their answer to respond in their words.
 - When a turn ends (state "idle"), tell the user the outcome in a sentence or two: what was done, the URL if there is one, and anything the agent flagged. Follow-ups go to the same session with send; it keeps its context.
 - If the user wants to move on, that's fine: the agent keeps working and the user gets a notification when it finishes or needs them. sessions lists everything later.
+- To choose an agent or workspace, call agents when the user names a tool or model or you are unsure which fits, and pick by description; otherwise use the defaults. Tell the user which agent you used when it isn't the default. A session keeps its agent: start a new session to switch.
 - Use stop only when the user asks (interrupt stops the current turn; close ends the session).`;
 
 const sessionArg = z.string().describe("Session name, e.g. “otter”.");
@@ -140,17 +141,24 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
     "agents",
     {
       title: "What can run",
-      description: "List the coding agents and workspaces (repositories) this switchboard can use.",
+      description:
+        "List the coding agents and workspaces (repositories) this switchboard can use, with what each is for. Call it to choose which agent or workspace fits a task.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
     wrap(async (_args: unknown, caller) => {
       const agents = manager.agents(caller);
       const workspaces = manager.workspaces(caller);
-      const line = `Agents: ${agents.map((a) => `${a.id}${a.default ? " (default)" : ""}`).join(", ")}. Workspaces: ${workspaces
-        .map((w) => `${w.id}${w.default ? " (default)" : ""}`)
-        .join(", ")}.`;
-      return result(line, { agents, workspaces });
+      const line = (id: string, isDefault: boolean, description?: string, detail?: string) =>
+        `${id}${isDefault ? " (default)" : ""}${description ? ` — ${description}` : ""}${detail ? ` · ${detail}` : ""}`;
+      const agentLines = agents.map((a) =>
+        line(a.id, a.default, a.description, a.model ? `model ${a.model}` : undefined),
+      );
+      const workspaceLines = workspaces.map((w) => line(w.id, w.default, w.description, w.path));
+      return result(`Agents:\n${agentLines.join("\n")}\n\nWorkspaces:\n${workspaceLines.join("\n")}`, {
+        agents,
+        workspaces,
+      });
     }),
   );
 
@@ -159,11 +167,11 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
     {
       title: "Start a session",
       description:
-        "Start a new coding-agent session on a task. Returns within ~10 s with the session name and its state: working, waiting (the agent has a question), or idle (already done).",
+        "Start a new coding-agent session on a task, optionally choosing the agent and workspace (see agents). Returns within ~10 s with the session name and its state: working, waiting (the agent has a question), or idle (already done).",
       inputSchema: {
         prompt: z.string().min(1).describe("The task, in plain words, with any context that helps."),
-        agent: z.string().optional().describe("Agent id from agents (default if omitted)."),
-        workspace: z.string().optional().describe("Workspace id from agents (default if omitted)."),
+        agent: z.string().optional().describe("Agent id from the agents tool (default if omitted)."),
+        workspace: z.string().optional().describe("Workspace id from the agents tool (default if omitted)."),
         model: z.string().optional().describe("Model override, e.g. opus or sonnet."),
         title: z.string().optional().describe("Short title for the session list."),
       },
@@ -259,7 +267,9 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       const list = manager.list(state ? { state } : undefined, caller);
       const line = list.length
         ? list
-            .map((s) => `${s.session}: ${s.state}${s.pending ? " (needs you)" : ""} — ${s.title}`)
+            .map(
+              (s) => `${s.session}: ${s.state}${s.pending ? " (needs you)" : ""} · ${s.agent} — ${s.title}`,
+            )
             .join("\n")
         : "No sessions.";
       return result(line, { sessions: list });

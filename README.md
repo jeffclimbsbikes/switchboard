@@ -34,7 +34,7 @@ done.
 
 | Tool | What it does |
 | --- | --- |
-| `agents` | configured agents and workspaces |
+| `agents` | configured agents and workspaces, with their descriptions |
 | `start` | new session on a task; returns within ~10 s with its state |
 | `send` | follow-up in a session (resumes parked ones) |
 | `wait` | progress since a cursor: activity, a pending question, or the reply |
@@ -58,6 +58,22 @@ claude mcp add switchboard -- node "$PWD/dist/cli.js" stdio
 
 Node 22.13+ is required. `switchboard check` confirms the agent executables
 and workspaces exist.
+
+## Choosing an agent and workspace
+
+Give every agent and workspace a short `description` (max 300 characters) so
+the client can pick by what each is for. It is optional; the `agents` tool
+lists them and the client falls back to the defaults.
+
+```toml
+[agents.claude]
+driver = "claude"
+description = "Strongest model; best for hard or open-ended work."
+
+[workspaces]
+site = { path = "~/src/site", description = "My website", default = true }
+scratch = "~/scratch"          # the plain path form still works
+```
 
 ## Remote: claude.ai as the client
 

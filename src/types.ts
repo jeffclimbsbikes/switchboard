@@ -69,11 +69,13 @@ export interface AgentInfo {
   id: string;
   driver: "claude" | "acp" | "fake";
   model?: string;
+  description?: string;
   default: boolean;
 }
 
 export interface WorkspaceInfo {
   id: string;
   path: string;
+  description?: string;
   default: boolean;
 }

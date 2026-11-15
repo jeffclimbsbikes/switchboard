@@ -68,6 +68,7 @@ export class SessionManager implements SessionManagerApi {
         id,
         driver: a.driver,
         ...("model" in a && a.model ? { model: a.model } : {}),
+        ...(a.description ? { description: a.description } : {}),
         default: id === access.defaultAgent,
       }));
   }

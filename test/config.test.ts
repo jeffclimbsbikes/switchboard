@@ -17,6 +17,37 @@ describe("config", () => {
     expect(workspaces(c)).toEqual([{ id: "pidev", path: "/srv/pidev", default: true }]);
   });
 
+  it("accepts descriptions on agents and workspaces", () => {
+    const c = parseConfig({
+      agents: {
+        a: { driver: "claude", description: "Careful" },
+        b: { driver: "acp", command: ["x"], description: "Fast" },
+        c: { driver: "fake", description: "Test" },
+      },
+      workspaces: { plain: "/srv/plain", rich: { path: "/srv/rich", description: "The site" } },
+    });
+    expect(c.agents.a?.description).toBe("Careful");
+    expect(c.agents.b?.description).toBe("Fast");
+    expect(c.agents.c?.description).toBe("Test");
+    expect(workspaces(c)).toEqual([
+      { id: "plain", path: "/srv/plain", default: true },
+      { id: "rich", path: "/srv/rich", description: "The site", default: false },
+    ]);
+  });
+
+  it("limits descriptions to 300 characters", () => {
+    const long = "x".repeat(301);
+    expect(() =>
+      parseConfig({ ...minimal, agents: { claude: { driver: "claude", description: long } } }),
+    ).toThrow(/description/);
+    expect(() => parseConfig({ ...minimal, workspaces: { w: { path: "/a", description: long } } })).toThrow(
+      /description/,
+    );
+    expect(
+      parseConfig({ ...minimal, agents: { claude: { driver: "claude", description: "x".repeat(300) } } }),
+    ).toBeTruthy();
+  });
+
   it("parses durations", () => {
     expect(parseDuration("25s")).toBe(25_000);
     expect(parseDuration("30m")).toBe(1_800_000);

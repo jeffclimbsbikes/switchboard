@@ -142,10 +142,48 @@ describe("mcp server", () => {
     expect(r.structuredContent).toMatchObject({ error: "not_found" });
   });
 
+  it("describes agents and workspaces", async () => {
+    const m = {
+      ...stubManager(),
+      agents: () => [
+        {
+          id: "claude",
+          driver: "claude" as const,
+          model: "opus",
+          description: "Best for hard problems",
+          default: true,
+        },
+        { id: "opencode", driver: "acp" as const, default: false },
+      ],
+      workspaces: () => [
+        { id: "pidev", path: "/srv/pidev", description: "The Raspberry Pi repo", default: true },
+        { id: "scratch", path: "/tmp/scratch", default: false },
+      ],
+    };
+    const client = await connect(m);
+    const r = await call(client, "agents");
+    const text = r.content[0]?.text ?? "";
+    expect(text).toContain("claude (default) — Best for hard problems · model opus");
+    expect(text).toContain("\nopencode\n");
+    expect(text).toContain("pidev (default) — The Raspberry Pi repo · /srv/pidev");
+    expect(text).toContain("\nscratch · /tmp/scratch");
+    expect(r.structuredContent).toMatchObject({
+      agents: [{ id: "claude", description: "Best for hard problems" }, { id: "opencode" }],
+      workspaces: [{ id: "pidev", description: "The Raspberry Pi repo" }, { id: "scratch" }],
+    });
+  });
+
+  it("explains how to choose an agent", () => {
+    expect(INSTRUCTIONS).toMatch(/call agents/);
+    expect(INSTRUCTIONS).toMatch(/start a new session to switch/);
+  });
+
   it("lists sessions and stops them", async () => {
     const m = stubManager();
     const client = await connect(m);
-    expect((await call(client, "sessions")).content[0]?.text).toMatch(/^otter: working — packing list/);
+    expect((await call(client, "sessions")).content[0]?.text).toMatch(
+      /^otter: working · claude — packing list/,
+    );
     const r = await call(client, "stop", { session: "otter", mode: "close" });
     expect(r.structuredContent).toMatchObject({ state: "closed" });
   });

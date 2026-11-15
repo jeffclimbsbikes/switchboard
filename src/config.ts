@@ -18,6 +18,8 @@ export function parseDuration(text: string): number {
 
 const path = z.string().transform(expandHome);
 
+const description = z.string().max(300).optional();
+
 const unixUser = z.string().regex(/^[a-z_][a-z0-9_-]*\$?$/i, "not a valid Unix username");
 
 const claudeAgent = z.object({
@@ -29,6 +31,7 @@ const claudeAgent = z.object({
     .default("default"),
   append_system_prompt: z.string().optional(),
   run_as: unixUser.optional(),
+  description,
   default: z.boolean().default(false),
 });
 
@@ -38,17 +41,19 @@ const acpAgent = z.object({
   env: z.record(z.string(), z.string()).default({}),
   model: z.string().optional(),
   run_as: unixUser.optional(),
+  description,
   default: z.boolean().default(false),
 });
 
 const fakeAgent = z.object({
   driver: z.literal("fake"),
+  description,
   default: z.boolean().default(false),
 });
 
 const agent = z.discriminatedUnion("driver", [claudeAgent, acpAgent, fakeAgent]);
 
-const workspace = z.union([path, z.object({ path, default: z.boolean().default(false) })]);
+const workspace = z.union([path, z.object({ path, description, default: z.boolean().default(false) })]);
 
 const auth = z.discriminatedUnion("login", [
   z.object({ login: z.literal("none") }),
@@ -158,9 +163,18 @@ export function defaultAgentId(config: Config): string {
   return (entries.find(([, a]) => a.default) ?? entries[0])?.[0] as string;
 }
 
-export function workspaces(config: Config): { id: string; path: string; default: boolean }[] {
+export function workspaces(
+  config: Config,
+): { id: string; path: string; description?: string; default: boolean }[] {
   const list = Object.entries(config.workspaces).map(([id, w]) =>
-    typeof w === "string" ? { id, path: w, default: false } : { id, path: w.path, default: w.default },
+    typeof w === "string"
+      ? { id, path: w, default: false }
+      : {
+          id,
+          path: w.path,
+          ...(w.description ? { description: w.description } : {}),
+          default: w.default,
+        },
   );
   if (list.length > 0 && !list.some((w) => w.default)) (list[0] as { default: boolean }).default = true;
   return list;
