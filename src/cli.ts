@@ -147,6 +147,7 @@ async function main() {
       config,
       db,
       createMcpServer: () => createMcpServer(manager, { maxWaitMs: config.max_wait }),
+      dashboard: manager,
     });
     const { host, port } = splitListen(config.listen);
     const server = app.listen(port, host, () =>

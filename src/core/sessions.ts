@@ -3,6 +3,10 @@ import type { Db } from "../db.js";
 import type { AgentSession, Driver, DriverEvent } from "../drivers/driver.js";
 import type {
   AgentInfo,
+  DashboardAgent,
+  DashboardSession,
+  DashboardSessionDetail,
+  DashboardSnapshot,
   SessionState,
   SessionSummary,
   SessionView,
@@ -11,7 +15,13 @@ import type {
 } from "../types.js";
 import { condenseActivity, describeRequest } from "./activity.js";
 import { resolveAnswer } from "./answers.js";
-import { type Caller, type SessionManagerApi, type StartInput, SwitchboardError } from "./api.js";
+import {
+  type Caller,
+  type DashboardApi,
+  type SessionManagerApi,
+  type StartInput,
+  SwitchboardError,
+} from "./api.js";
 import { pickName } from "./names.js";
 import { type Notifier, nullNotifier } from "./notifier.js";
 import { type Access, canSee, resolveAccess } from "./policy.js";
@@ -36,13 +46,17 @@ interface Proc {
 type Waiter = () => void;
 
 const NOTE_CHARS = 300;
+const DASHBOARD_CLOSED_SHOWN = 100;
+const DASHBOARD_ACTIVITY_EVENTS = 60;
+const DASHBOARD_EVENT_CAP = 500;
+const STATES: SessionState[] = ["starting", "working", "waiting", "idle", "parked", "failed", "closed"];
 
 function unref(t: NodeJS.Timeout): NodeJS.Timeout {
   t.unref?.();
   return t;
 }
 
-export class SessionManager implements SessionManagerApi {
+export class SessionManager implements SessionManagerApi, DashboardApi {
   private readonly config: Config;
   private readonly drivers: Record<string, Driver>;
   private readonly notifier: Notifier;
@@ -79,6 +93,79 @@ export class SessionManager implements SessionManagerApi {
     return configWorkspaces(this.config)
       .filter((w) => access.workspaces.includes(w.id))
       .map((w) => ({ ...w, default: w.id === access.defaultWorkspace }));
+  }
+
+  snapshot(caller?: Caller): DashboardSnapshot {
+    const access = resolveAccess(this.config, caller);
+    const rows = this.store.list().filter((row) => canSee(access, row.owner));
+    const byState = Object.fromEntries(STATES.map((s) => [s, 0])) as Record<SessionState, number>;
+    for (const row of rows) byState[row.state]++;
+    const shown = rows.filter((r) => r.state !== "closed");
+    const closed = rows.filter((r) => r.state === "closed").slice(-DASHBOARD_CLOSED_SHOWN);
+    const sessions = [...shown, ...closed].map((row) =>
+      this.dashboardSession(row, access, row.state !== "closed"),
+    );
+    const agents: DashboardAgent[] = this.agents(caller).map((a) => {
+      const configured = this.config.agents[a.id];
+      const liveSessions = sessions.filter((s) => s.live && s.agent === a.id).map((s) => s.name);
+      const runAs =
+        !access.restricted && configured && "run_as" in configured ? configured.run_as : undefined;
+      return { ...a, ...(runAs && { runAs }), live: liveSessions.length, liveSessions };
+    });
+    return {
+      viewer: { ...(access.email && { email: access.email }), restricted: access.restricted },
+      agents,
+      workspaces: this.workspaces(caller),
+      sessions,
+      counts: {
+        total: rows.length,
+        live: sessions.filter((s) => s.live).length,
+        maxLive: this.config.max_live_sessions,
+        byState,
+      },
+    };
+  }
+
+  detail(
+    session: string,
+    opts: { since?: number; limit?: number } = {},
+    caller?: Caller,
+  ): DashboardSessionDetail {
+    const access = resolveAccess(this.config, caller);
+    const row = this.require(session, access);
+    const limit = Math.min(Math.max(1, opts.limit ?? DASHBOARD_EVENT_CAP), DASHBOARD_EVENT_CAP);
+    const lastSeq = this.store.lastSeq(session);
+    const page =
+      opts.since === undefined
+        ? this.store.lastEvents(session, limit)
+        : this.store.eventsPage(session, Math.max(0, opts.since), limit);
+    const first = page[0]?.seq;
+    const last = page.at(-1)?.seq;
+    return {
+      session: this.dashboardSession(row, access, true),
+      events: page.map((e) => ({ seq: e.seq, at: e.at, event: e.data })),
+      lastSeq,
+      hasMore: last !== undefined && last < lastSeq,
+      truncated: opts.since === undefined && first !== undefined && first > 1,
+    };
+  }
+
+  private dashboardSession(row: SessionRow, access: Access, withActivity: boolean): DashboardSession {
+    const activity = withActivity
+      ? condenseActivity(this.store.lastEvents(row.name, DASHBOARD_ACTIVITY_EVENTS).map((e) => e.data))
+      : [];
+    const { session: name, ...view } = this.viewOf(row);
+    return {
+      ...view,
+      name,
+      cwd: row.cwd,
+      ...(row.model && { model: row.model }),
+      ...(!access.restricted && row.owner && { owner: row.owner }),
+      live: !!this.live.get(row.name)?.session,
+      ...(row.lastActivity && { lastActivity: row.lastActivity }),
+      activity,
+      ...(row.pending && { pending: row.pending }),
+    };
   }
 
   async start(input: StartInput, caller?: Caller): Promise<SessionView> {

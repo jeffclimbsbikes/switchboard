@@ -4,12 +4,14 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express from "express";
 import type { JWTVerifyGetKey } from "jose";
 import type { Config } from "../config.js";
+import type { DashboardApi } from "../core/api.js";
 import type { Db } from "../db.js";
 import { requireBearer } from "./auth/bearer.js";
 import { ClientResolver } from "./auth/clients.js";
 import { createIdentify } from "./auth/identity.js";
 import { canonicalResource, metadataRouter, oauthRouter } from "./auth/oauth.js";
 import { migrate } from "./auth/store.js";
+import { dashboardRouter } from "./dashboard/router.js";
 
 export { listGrants, revokeAll } from "./auth/store.js";
 
@@ -17,6 +19,8 @@ export interface HttpAppOptions {
   config: Config;
   db: Db;
   createMcpServer: () => McpServer;
+  /** Serves the read-only dashboard under /dashboard when given. */
+  dashboard?: DashboardApi;
   now?: () => Date;
   accessKeys?: JWTVerifyGetKey;
   fetch?: typeof fetch;
@@ -53,6 +57,7 @@ export function createHttpApp(opts: HttpAppOptions): express.Express {
   const app = express();
   app.disable("x-powered-by");
 
+  const identify = createIdentify(auth, { accessKeys: opts.accessKeys, now });
   const mcpHandlers: express.RequestHandler[] = [];
 
   if (auth.login !== "none") {
@@ -67,7 +72,7 @@ export function createHttpApp(opts: HttpAppOptions): express.Express {
         issuer,
         resource,
         loginMode: auth.login,
-        identify: createIdentify(auth, { accessKeys: opts.accessKeys, now }),
+        identify,
         clients: new ClientResolver(db, now, opts.fetch),
       }),
     );
@@ -77,6 +82,19 @@ export function createHttpApp(opts: HttpAppOptions): express.Express {
         now,
         resource,
         resourceMetadataUrl: `${issuer}/.well-known/oauth-protected-resource/mcp`,
+      }),
+    );
+  }
+
+  if (opts.dashboard) {
+    app.use(
+      dashboardRouter({
+        config,
+        db,
+        dashboard: opts.dashboard,
+        createMcpServer: opts.createMcpServer,
+        identify,
+        now,
       }),
     );
   }

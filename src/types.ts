@@ -79,3 +79,42 @@ export interface WorkspaceInfo {
   description?: string;
   default: boolean;
 }
+
+export interface DashboardAgent extends AgentInfo {
+  runAs?: string;
+  live: number;
+  liveSessions: string[];
+}
+
+export interface DashboardSession extends Omit<SessionView, "session"> {
+  name: string;
+  cwd: string;
+  model?: string;
+  owner?: string;
+  live: boolean;
+  lastActivity?: string;
+  activity: string[];
+  pending?: PendingRequest;
+}
+
+export interface DashboardSnapshot {
+  viewer: { email?: string; restricted: boolean };
+  agents: DashboardAgent[];
+  workspaces: WorkspaceInfo[];
+  sessions: DashboardSession[];
+  counts: { total: number; live: number; maxLive: number; byState: Record<SessionState, number> };
+}
+
+export interface DashboardEvent {
+  seq: number;
+  at: string;
+  event: unknown;
+}
+
+export interface DashboardSessionDetail {
+  session: DashboardSession;
+  events: DashboardEvent[];
+  lastSeq: number;
+  hasMore: boolean;
+  truncated: boolean;
+}

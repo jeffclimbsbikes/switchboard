@@ -95,6 +95,15 @@ const COLUMNS = {
   lastActivity: "last_activity",
 } as const;
 
+function toEvent(session: string, r: Raw): StoredEvent {
+  return {
+    session,
+    seq: r.seq as number,
+    at: r.at as string,
+    data: JSON.parse(r.data as string) as StoredEventData,
+  };
+}
+
 export class SessionStore {
   constructor(private readonly db: Db) {
     migrate(db);
@@ -183,11 +192,21 @@ export class SessionStore {
     return this.db
       .prepare("SELECT seq, at, data FROM events WHERE session = ? AND seq > ? ORDER BY seq")
       .all(session, seq)
-      .map((r) => ({
-        session,
-        seq: r.seq as number,
-        at: r.at as string,
-        data: JSON.parse(r.data as string) as StoredEventData,
-      }));
+      .map((r) => toEvent(session, r));
+  }
+
+  eventsPage(session: string, since: number, limit: number): StoredEvent[] {
+    return this.db
+      .prepare("SELECT seq, at, data FROM events WHERE session = ? AND seq > ? ORDER BY seq LIMIT ?")
+      .all(session, since, limit)
+      .map((r) => toEvent(session, r));
+  }
+
+  lastEvents(session: string, limit: number): StoredEvent[] {
+    return this.db
+      .prepare("SELECT seq, at, data FROM events WHERE session = ? ORDER BY seq DESC LIMIT ?")
+      .all(session, limit)
+      .map((r) => toEvent(session, r))
+      .reverse();
   }
 }

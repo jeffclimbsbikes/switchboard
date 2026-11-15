@@ -1,5 +1,7 @@
 import type {
   AgentInfo,
+  DashboardSessionDetail,
+  DashboardSnapshot,
   SessionState,
   SessionSummary,
   SessionView,
@@ -39,6 +41,13 @@ export interface SessionManagerApi {
   list(filter?: { state?: SessionState }, caller?: Caller): SessionSummary[];
   stop(session: string, mode: "interrupt" | "close", caller?: Caller): Promise<SessionView>;
   shutdown(): Promise<void>;
+}
+
+/** Read-only views for the dashboard; honours the same access policy as the tools. */
+export interface DashboardApi {
+  snapshot(caller?: Caller): DashboardSnapshot;
+  /** Without `since`: the newest `limit` events. With it: events after that seq, oldest first. */
+  detail(session: string, opts?: { since?: number; limit?: number }, caller?: Caller): DashboardSessionDetail;
 }
 
 export class SwitchboardError extends Error {

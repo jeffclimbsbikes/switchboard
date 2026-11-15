@@ -94,6 +94,23 @@ the `/authorize` application, and the allowed emails. See
 Notifications (Telegram, ntfy, or any command) fire when a turn ends, the
 agent needs you, or it fails — but only if no client is already waiting.
 
+## Dashboard
+
+`GET /dashboard` is a read-only mission-control page (no build step, no
+external assets) that works on a phone and can be saved to the home screen. It
+shows the live KPIs, every configured agent and workspace, sessions grouped by
+state with their pending questions, a per-session event timeline, the exact MCP
+tool contract and instructions a client sees, connected clients, and a config
+summary without secrets. It polls `/dashboard/api/state` every 3 s;
+`/dashboard/api/sessions/<name>?since=<seq>` pages one session's event log
+(500 max; without `since` you get the newest events).
+
+Auth follows `[auth] login`: `none` and `dev` are open on loopback;
+`cloudflare-access` verifies `Cf-Access-Jwt-Assertion` like `/authorize`, so add
+`/dashboard` to the Access application that covers `/authorize`. Users listed
+under `[users]` see only their own sessions, agents and workspaces, and no
+connected clients.
+
 ## Multiple people
 
 By default everyone who can sign in is the admin: all agents, all workspaces,
