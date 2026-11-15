@@ -1,0 +1,36 @@
+# Copy to ~/.config/switchboard/config.toml (or pass --config).
+
+listen = "127.0.0.1:8787"
+# public_url = "https://switchboard.example.com"   # required for OAuth (anything but auth = none)
+# state_dir = "~/.local/state/switchboard"
+max_wait = "25s"            # no tool call blocks longer than this
+idle_park_after = "30m"     # idle sessions stop their process; send resumes them
+max_live_sessions = 4
+
+[agents.claude]
+driver = "claude"
+# executable = "~/.local/bin/claude"   # defaults to the SDK's bundled/PATH claude
+model = "opus"
+permission_mode = "default"            # or acceptEdits, plan, bypassPermissions, …
+# append_system_prompt = "You are working on my home server."
+
+# Any Agent Client Protocol agent:
+# [agents.opencode]
+# driver = "acp"
+# command = ["opencode", "acp"]
+
+[workspaces]
+home = "~/src/my-project"
+
+# Remote access for claude.ai: Cloudflare Access guards the one human step.
+# [auth]
+# login = "cloudflare-access"
+# team = "your-team"            # <team>.cloudflareaccess.com
+# aud = "…"                     # the Access application's AUD tag for /authorize
+# allow = ["you@example.com"]
+
+# [notify]
+# telegram = { token_env = "TELEGRAM_BOT_TOKEN", chat = "123456789" }
+# ntfy = { url = "https://ntfy.sh/your-topic" }
+# command = ["notify-send", "switchboard"]
+# nag_after = "10m"

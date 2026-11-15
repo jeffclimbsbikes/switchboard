@@ -26,7 +26,10 @@ describe("config", () => {
   it("picks the agent marked default", () => {
     const c = parseConfig({
       ...minimal,
-      agents: { claude: { driver: "claude" }, oc: { driver: "acp", command: ["opencode", "acp"], default: true } },
+      agents: {
+        claude: { driver: "claude" },
+        oc: { driver: "acp", command: ["opencode", "acp"], default: true },
+      },
     });
     expect(defaultAgentId(c)).toBe("oc");
   });
