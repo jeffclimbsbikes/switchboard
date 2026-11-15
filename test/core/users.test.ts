@@ -30,7 +30,8 @@ function setup(db = openDb(":memory:")) {
       notes.push(n);
     },
   };
-  const manager = new SessionManager({ config, db, drivers: { fake: new FakeDriver() }, notifier });
+  const fake = new FakeDriver();
+  const manager = new SessionManager({ config, db, drivers: { fake, other: fake }, notifier });
   managers.push(manager);
   return { manager, db, notes, config };
 }

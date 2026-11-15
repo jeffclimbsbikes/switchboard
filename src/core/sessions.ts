@@ -102,8 +102,8 @@ export class SessionManager implements SessionManagerApi {
         "not_found",
       );
     }
-    const driver = this.drivers[agent.driver];
-    if (!driver) throw new SwitchboardError(`The ${agent.driver} driver is not available.`, "bad_input");
+    const driver = this.drivers[agentId];
+    if (!driver) throw new SwitchboardError(`The ${agentId} agent is not available.`, "bad_input");
 
     await this.ensureCapacity();
 
@@ -342,7 +342,7 @@ export class SessionManager implements SessionManagerApi {
       );
     }
     const agent = this.config.agents[row.agent];
-    const driver = agent && this.drivers[agent.driver];
+    const driver = agent && this.drivers[row.agent];
     if (!agent || !driver) {
       throw new SwitchboardError(
         `The agent ${row.agent} for ${row.name} is no longer configured.`,

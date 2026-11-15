@@ -19,7 +19,7 @@ function setup(extra: Record<string, unknown> = {}, db: Db = openDb(":memory:"),
       notes.push(n);
     },
   };
-  const manager = new SessionManager({ config, db, drivers: { fake: driver }, notifier });
+  const manager = new SessionManager({ config, db, drivers: { fake: driver, other: driver }, notifier });
   return { manager, db, notes, driver, config };
 }
 
@@ -292,5 +292,39 @@ describe("notifications", () => {
     await manager.respond(session, pending?.id as string, "allow");
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(notes.map((n) => n.kind)).toEqual(["waiting", "done"]);
+  });
+});
+
+describe("driver selection", () => {
+  it("uses the driver of the named agent, not the first one of the same kind", async () => {
+    const { SessionManager } = await import("../../src/core/sessions.js");
+    const { FakeDriver } = await import("../../src/drivers/fake.js");
+    const { parseConfig } = await import("../../src/config.js");
+    const { openDb } = await import("../../src/db.js");
+    const config = parseConfig({
+      agents: { mine: { driver: "fake", default: true }, theirs: { driver: "fake" } },
+      workspaces: { w: "/tmp" },
+    });
+    const used: string[] = [];
+    const tagged = (tag: string) => {
+      const d = new FakeDriver();
+      const start = d.start.bind(d);
+      d.start = (opts) => {
+        used.push(tag);
+        return start(opts);
+      };
+      return d;
+    };
+    const m = new SessionManager({
+      config,
+      db: openDb(":memory:"),
+      drivers: { mine: tagged("mine"), theirs: tagged("theirs") },
+    });
+    const view = await m.start({ prompt: "reply hi", agent: "theirs" });
+    await m.wait(view.session, { maxWaitMs: 2_000 });
+    expect(used).toEqual(["theirs"]);
+    await m.stop(view.session, "close");
+    await m.send(view.session, "count").catch(() => {});
+    await m.shutdown();
   });
 });
