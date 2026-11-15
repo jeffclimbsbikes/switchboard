@@ -5,3 +5,4 @@ coverage/
 *.db-*
 .env
 .DS_Store
+.design-ref/

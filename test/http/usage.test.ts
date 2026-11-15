@@ -88,11 +88,12 @@ describe("dashboard usage and catalog", () => {
     expect(JSON.stringify(body.usage).length).toBeLessThan(3000);
   });
 
-  it("ships the Usage and Models tabs in the page", () => {
+  it("ships availability, usage and catalog sections in the page", () => {
     const script = /<script>([\s\S]*)<\/script>/.exec(DASHBOARD_HTML)?.[1] ?? "";
     expect(() => new Script(script)).not.toThrow();
-    expect(DASHBOARD_HTML).toContain('["usage", "Usage"]');
-    expect(DASHBOARD_HTML).toContain('["models", "Models"]');
+    expect(DASHBOARD_HTML).toContain("available agents");
+    expect(DASHBOARD_HTML).toContain("plan windows");
+    expect(DASHBOARD_HTML).toContain('["tools", "Tools"]');
     expect(DASHBOARD_HTML).toContain("API-equivalent cost (subscription usage, not a bill)");
     expect(DASHBOARD_HTML).toContain("https://ollama.com/settings");
     expect(DASHBOARD_HTML).toContain("price not published");
