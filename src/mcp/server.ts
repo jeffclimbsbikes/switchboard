@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { SessionManagerApi } from "../core/api.js";
+import type { Caller, SessionManagerApi } from "../core/api.js";
 import { SwitchboardError } from "../core/api.js";
 import type { PendingRequest, SessionState, SessionView, WaitResult } from "../types.js";
 
@@ -108,10 +108,19 @@ function failure(err: unknown) {
   };
 }
 
-function wrap<A>(fn: (args: A) => Promise<ReturnType<typeof result>>) {
-  return async (args: A) => {
+interface ToolExtra {
+  authInfo?: { extra?: Record<string, unknown> };
+}
+
+function callerOf(extra: ToolExtra | undefined): Caller {
+  const email = extra?.authInfo?.extra?.email;
+  return typeof email === "string" && email ? { email } : {};
+}
+
+function wrap<A>(fn: (args: A, caller: Caller) => Promise<ReturnType<typeof result>>) {
+  return async (args: A, extra?: ToolExtra) => {
     try {
-      return await fn(args);
+      return await fn(args, callerOf(extra));
     } catch (err) {
       return failure(err);
     }
@@ -123,8 +132,8 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
   const quick = quickWaitMs(opts.maxWaitMs);
   const maxSeconds = Math.max(1, Math.floor(opts.maxWaitMs / 1000));
 
-  async function settle(view: SessionView, waitMs = quick) {
-    return report(view, await manager.wait(view.session, { maxWaitMs: waitMs }));
+  async function settle(view: SessionView, caller: Caller, waitMs = quick) {
+    return report(view, await manager.wait(view.session, { maxWaitMs: waitMs }, caller));
   }
 
   server.registerTool(
@@ -135,9 +144,9 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
-    wrap(async () => {
-      const agents = manager.agents();
-      const workspaces = manager.workspaces();
+    wrap(async (_args: unknown, caller) => {
+      const agents = manager.agents(caller);
+      const workspaces = manager.workspaces(caller);
       const line = `Agents: ${agents.map((a) => `${a.id}${a.default ? " (default)" : ""}`).join(", ")}. Workspaces: ${workspaces
         .map((w) => `${w.id}${w.default ? " (default)" : ""}`)
         .join(", ")}.`;
@@ -160,8 +169,10 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       },
     },
     wrap(
-      async (args: { prompt: string; agent?: string; workspace?: string; model?: string; title?: string }) =>
-        settle(await manager.start(args)),
+      async (
+        args: { prompt: string; agent?: string; workspace?: string; model?: string; title?: string },
+        caller,
+      ) => settle(await manager.start(args, caller), caller),
     ),
   );
 
@@ -173,8 +184,8 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
         "Send the next message to a session (a follow-up, a correction, more context). Resumes parked sessions with their context. Returns within ~10 s.",
       inputSchema: { session: sessionArg, message: z.string().min(1) },
     },
-    wrap(async ({ session, message }: { session: string; message: string }) =>
-      settle(await manager.send(session, message)),
+    wrap(async ({ session, message }: { session: string; message: string }, caller) =>
+      settle(await manager.send(session, message, caller), caller),
     ),
   );
 
@@ -197,15 +208,24 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ session, cursor, seconds }: { session: string; cursor?: number; seconds?: number }) => {
-      const w = await manager.wait(session, {
-        ...(cursor !== undefined ? { cursor } : {}),
-        maxWaitMs: seconds !== undefined ? seconds * 1000 : opts.maxWaitMs,
-      });
-      const view = manager.list().find((s) => s.session === session);
-      if (!view) throw new SwitchboardError(`No session named “${session}”.`, "not_found");
-      return report(view, w);
-    }),
+    wrap(
+      async (
+        { session, cursor, seconds }: { session: string; cursor?: number; seconds?: number },
+        caller,
+      ) => {
+        const w = await manager.wait(
+          session,
+          {
+            ...(cursor !== undefined ? { cursor } : {}),
+            maxWaitMs: seconds !== undefined ? seconds * 1000 : opts.maxWaitMs,
+          },
+          caller,
+        );
+        const view = manager.list(undefined, caller).find((s) => s.session === session);
+        if (!view) throw new SwitchboardError(`No session named “${session}”.`, "not_found");
+        return report(view, w);
+      },
+    ),
   );
 
   server.registerTool(
@@ -220,8 +240,8 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
         answer: z.string().min(1),
       },
     },
-    wrap(async ({ session, request, answer }: { session: string; request: string; answer: string }) =>
-      settle(await manager.respond(session, request, answer)),
+    wrap(async ({ session, request, answer }: { session: string; request: string; answer: string }, caller) =>
+      settle(await manager.respond(session, request, answer, caller), caller),
     ),
   );
 
@@ -235,8 +255,8 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       },
       annotations: { readOnlyHint: true },
     },
-    wrap(async ({ state }: { state?: SessionState }) => {
-      const list = manager.list(state ? { state } : undefined);
+    wrap(async ({ state }: { state?: SessionState }, caller) => {
+      const list = manager.list(state ? { state } : undefined, caller);
       const line = list.length
         ? list
             .map((s) => `${s.session}: ${s.state}${s.pending ? " (needs you)" : ""} — ${s.title}`)
@@ -254,8 +274,8 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       inputSchema: { session: sessionArg, mode: z.enum(["interrupt", "close"]).default("interrupt") },
       annotations: { destructiveHint: true },
     },
-    wrap(async ({ session, mode }: { session: string; mode: "interrupt" | "close" }) => {
-      const view = await manager.stop(session, mode);
+    wrap(async ({ session, mode }: { session: string; mode: "interrupt" | "close" }, caller) => {
+      const view = await manager.stop(session, mode, caller);
       return result(`“${view.session}” is ${view.state}.`, { ...view, next: nextStep(view.state) });
     }),
   );

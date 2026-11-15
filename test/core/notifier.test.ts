@@ -66,10 +66,14 @@ describe("createNotifier", () => {
     });
     const notifier = createNotifier(
       notifyConfig({ telegram: { chat: "1" }, ntfy: { url: "https://ntfy.example/t" } }),
-      { fetch: fetch as unknown as typeof globalThis.fetch, env: { TELEGRAM_BOT_TOKEN: "t" } },
+      {
+        fetch: fetch as unknown as typeof globalThis.fetch,
+        env: { TELEGRAM_BOT_TOKEN: "t" },
+        retryDelayMs: 1,
+      },
     );
     await expect(notifier.notify(n)).resolves.toBeUndefined();
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(err).toHaveBeenCalled();
     err.mockRestore();
   });

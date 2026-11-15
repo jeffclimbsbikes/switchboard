@@ -18,6 +18,8 @@ export function parseDuration(text: string): number {
 
 const path = z.string().transform(expandHome);
 
+const unixUser = z.string().regex(/^[a-z_][a-z0-9_-]*\$?$/i, "not a valid Unix username");
+
 const claudeAgent = z.object({
   driver: z.literal("claude"),
   executable: path.optional(),
@@ -26,6 +28,7 @@ const claudeAgent = z.object({
     .enum(["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"])
     .default("default"),
   append_system_prompt: z.string().optional(),
+  run_as: unixUser.optional(),
   default: z.boolean().default(false),
 });
 
@@ -34,6 +37,7 @@ const acpAgent = z.object({
   command: z.array(z.string()).min(1),
   env: z.record(z.string(), z.string()).default({}),
   model: z.string().optional(),
+  run_as: unixUser.optional(),
   default: z.boolean().default(false),
 });
 
@@ -67,22 +71,58 @@ const notify = z
   })
   .default({ nag_after: 600_000 });
 
-export const configSchema = z.object({
-  listen: z.string().default("127.0.0.1:8787"),
-  public_url: z.string().url().optional(),
-  state_dir: path.default(join(homedir(), ".local", "state", "switchboard")),
-  max_wait: duration.default(25_000),
-  idle_park_after: duration.default(1_800_000),
-  max_live_sessions: z.number().int().positive().default(4),
-  agents: z
-    .record(z.string(), agent)
-    .refine((a) => Object.keys(a).length > 0, "configure at least one agent"),
-  workspaces: z
-    .record(z.string(), workspace)
-    .refine((w) => Object.keys(w).length > 0, "configure at least one workspace"),
-  auth: auth.default({ login: "none" }),
-  notify,
+const user = z.object({
+  agents: z.array(z.string()).optional(),
+  workspaces: z.array(z.string()).optional(),
+  notify_chat: z.string().optional(),
 });
+
+const users = z
+  .record(z.string(), user)
+  .default({})
+  .transform((u) => Object.fromEntries(Object.entries(u).map(([email, v]) => [email.toLowerCase(), v])));
+
+export const configSchema = z
+  .object({
+    listen: z.string().default("127.0.0.1:8787"),
+    public_url: z.string().url().optional(),
+    state_dir: path.default(join(homedir(), ".local", "state", "switchboard")),
+    max_wait: duration.default(25_000),
+    idle_park_after: duration.default(1_800_000),
+    max_live_sessions: z.number().int().positive().default(4),
+    agents: z
+      .record(z.string(), agent)
+      .refine((a) => Object.keys(a).length > 0, "configure at least one agent"),
+    workspaces: z
+      .record(z.string(), workspace)
+      .refine((w) => Object.keys(w).length > 0, "configure at least one workspace"),
+    auth: auth.default({ login: "none" }),
+    notify,
+    users,
+  })
+  .superRefine((config, ctx) => {
+    const workspaceIds = Object.keys(config.workspaces);
+    for (const [email, u] of Object.entries(config.users)) {
+      for (const id of u.agents ?? []) {
+        if (!(id in config.agents)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["users", email, "agents"],
+            message: `unknown agent "${id}"; configured: ${Object.keys(config.agents).join(", ")}`,
+          });
+        }
+      }
+      for (const id of u.workspaces ?? []) {
+        if (!workspaceIds.includes(id)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["users", email, "workspaces"],
+            message: `unknown workspace "${id}"; configured: ${workspaceIds.join(", ")}`,
+          });
+        }
+      }
+    }
+  });
 
 export type RawConfig = z.input<typeof configSchema>;
 export type Config = z.output<typeof configSchema>;

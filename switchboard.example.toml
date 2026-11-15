@@ -13,6 +13,7 @@ driver = "claude"
 model = "opus"
 permission_mode = "default"            # or acceptEdits, plan, bypassPermissions, …
 # append_system_prompt = "You are working on my home server."
+# run_as = "diana"                     # run this agent as another Unix user via sudo -n -u (claude and acp)
 
 # Any Agent Client Protocol agent:
 # [agents.opencode]
@@ -21,6 +22,12 @@ permission_mode = "default"            # or acceptEdits, plan, bypassPermissions
 
 [workspaces]
 home = "~/src/my-project"
+
+# Restrict specific people (by sign-in email). Everyone not listed stays unrestricted.
+# [users."diana@example.com"]
+# agents = ["diana"]                    # omit for all agents
+# workspaces = ["home"]                 # omit for all workspaces
+# notify_chat = "123456789"             # Telegram chat for her sessions' notifications
 
 # Remote access for claude.ai: Cloudflare Access guards the one human step.
 # [auth]

@@ -78,6 +78,38 @@ the `/authorize` application, and the allowed emails. See
 Notifications (Telegram, ntfy, or any command) fire when a turn ends, the
 agent needs you, or it fails — but only if no client is already waiting.
 
+## Multiple people
+
+By default everyone who can sign in is the admin: all agents, all workspaces,
+all sessions. List someone under `users` (keyed by the email they sign in with)
+to restrict them. They only see the agents and workspaces you list (omit a list
+for "all"), the first listed one is their default, and they only see and act on
+sessions they started. Someone else's session looks exactly like a missing one.
+Emails not listed stay unrestricted, and so do stdio and `auth = "none"`.
+
+```toml
+[users."diana@example.com"]
+agents = ["diana"]
+workspaces = ["diana-site"]
+notify_chat = "123456789"     # her Telegram chat; needs [notify.telegram] for the bot token
+```
+
+To give her a less-privileged agent, run it as another Unix user with `run_as`
+on a `claude` or `acp` agent:
+
+```toml
+[agents.diana]
+driver = "claude"
+run_as = "diana"
+```
+
+switchboard then starts the agent with `sudo -n -u diana -H`, so it needs a
+sudoers rule such as `switchboard ALL=(diana) NOPASSWD: ALL`. The target user
+must be able to execute the agent binary and read the workspace. Only `PATH`,
+`CLAUDE_*`, `ANTHROPIC_*` and `SWITCHBOARD_*` variables (plus an acp agent's
+configured `env`) are passed through; the agent gets her `HOME`, her
+credentials, and her permissions.
+
 ## Security model
 
 switchboard runs coding agents with whatever permissions you configure; with

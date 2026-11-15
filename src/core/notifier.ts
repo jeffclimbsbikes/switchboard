@@ -5,6 +5,8 @@ export interface Notification {
   session: string;
   kind: "done" | "waiting" | "failed";
   text: string;
+  /** Telegram chat that overrides the configured one (a session owner's own chat). */
+  chat?: string;
 }
 
 export interface Notifier {
@@ -37,13 +39,13 @@ export function createNotifier(config: NotifyConfig, deps: NotifierDeps = {}): N
 
   if (config.telegram) {
     const { token_env, chat } = config.telegram;
-    channels.push(async (_n, message) => {
+    channels.push(async (n, message) => {
       const token = env[token_env];
       if (!token) throw new Error(`telegram: ${token_env} is not set`);
       const res = await doFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: chat, text: message }),
+        body: JSON.stringify({ chat_id: n.chat ?? chat, text: message }),
       });
       if (!res.ok) throw new Error(`telegram: HTTP ${res.status}`);
     });

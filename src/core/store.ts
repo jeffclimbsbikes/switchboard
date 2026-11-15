@@ -11,6 +11,7 @@ export interface SessionRow {
   cwd: string;
   model?: string;
   title: string;
+  owner?: string;
   state: SessionState;
   agentSessionId?: string;
   pending?: PendingRequest;
@@ -51,7 +52,8 @@ export function migrate(db: Db): void {
       pending TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      last_activity TEXT
+      last_activity TEXT,
+      owner TEXT
     );
     CREATE TABLE IF NOT EXISTS events (
       session TEXT NOT NULL,
@@ -62,6 +64,8 @@ export function migrate(db: Db): void {
       PRIMARY KEY (session, seq)
     );
   `);
+  const columns = db.prepare("PRAGMA table_info(sessions)").all();
+  if (!columns.some((c) => c.name === "owner")) db.exec("ALTER TABLE sessions ADD COLUMN owner TEXT");
 }
 
 function toRow(r: Raw): SessionRow {
@@ -72,6 +76,7 @@ function toRow(r: Raw): SessionRow {
     cwd: r.cwd as string,
     ...(r.model != null && { model: r.model as string }),
     title: r.title as string,
+    ...(r.owner != null && { owner: r.owner as string }),
     state: r.state as SessionState,
     ...(r.agent_session_id != null && { agentSessionId: r.agent_session_id as string }),
     ...(r.pending != null && { pending: JSON.parse(r.pending as string) as PendingRequest }),
@@ -98,8 +103,8 @@ export class SessionStore {
   create(row: SessionRow): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (name, agent, workspace, cwd, model, title, state, agent_session_id, pending, created_at, updated_at, last_activity)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions (name, agent, workspace, cwd, model, title, state, agent_session_id, pending, created_at, updated_at, last_activity, owner)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.name,
@@ -114,6 +119,7 @@ export class SessionStore {
         row.createdAt,
         row.updatedAt,
         row.lastActivity ?? null,
+        row.owner ?? null,
       );
   }
 

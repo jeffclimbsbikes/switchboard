@@ -1,4 +1,4 @@
-import { type Config, workspaces as configWorkspaces, defaultAgentId } from "../config.js";
+import { type Config, workspaces as configWorkspaces } from "../config.js";
 import type { Db } from "../db.js";
 import type { AgentSession, Driver, DriverEvent } from "../drivers/driver.js";
 import type {
@@ -11,9 +11,10 @@ import type {
 } from "../types.js";
 import { condenseActivity, describeRequest } from "./activity.js";
 import { resolveAnswer } from "./answers.js";
-import { type SessionManagerApi, type StartInput, SwitchboardError } from "./api.js";
+import { type Caller, type SessionManagerApi, type StartInput, SwitchboardError } from "./api.js";
 import { pickName } from "./names.js";
 import { type Notifier, nullNotifier } from "./notifier.js";
+import { type Access, canSee, resolveAccess } from "./policy.js";
 import { type SessionRow, SessionStore, type StoredEvent } from "./store.js";
 
 export interface SessionManagerOptions {
@@ -59,32 +60,39 @@ export class SessionManager implements SessionManagerApi {
     this.recover();
   }
 
-  agents(): AgentInfo[] {
-    const def = defaultAgentId(this.config);
-    return Object.entries(this.config.agents).map(([id, a]) => ({
-      id,
-      driver: a.driver,
-      ...("model" in a && a.model ? { model: a.model } : {}),
-      default: id === def,
-    }));
+  agents(caller?: Caller): AgentInfo[] {
+    const access = resolveAccess(this.config, caller);
+    return Object.entries(this.config.agents)
+      .filter(([id]) => access.agents.includes(id))
+      .map(([id, a]) => ({
+        id,
+        driver: a.driver,
+        ...("model" in a && a.model ? { model: a.model } : {}),
+        default: id === access.defaultAgent,
+      }));
   }
 
-  workspaces(): WorkspaceInfo[] {
-    return configWorkspaces(this.config);
+  workspaces(caller?: Caller): WorkspaceInfo[] {
+    const access = resolveAccess(this.config, caller);
+    if (!access.restricted) return configWorkspaces(this.config);
+    return configWorkspaces(this.config)
+      .filter((w) => access.workspaces.includes(w.id))
+      .map((w) => ({ ...w, default: w.id === access.defaultWorkspace }));
   }
 
-  async start(input: StartInput): Promise<SessionView> {
+  async start(input: StartInput, caller?: Caller): Promise<SessionView> {
+    const access = resolveAccess(this.config, caller);
     const prompt = input.prompt?.trim();
     if (!prompt) throw new SwitchboardError("What should the agent do? The prompt is empty.", "bad_input");
-    const agentId = input.agent ?? defaultAgentId(this.config);
-    const agent = this.config.agents[agentId];
+    const agentId = input.agent ?? access.defaultAgent;
+    const agent = access.agents.includes(agentId) ? this.config.agents[agentId] : undefined;
     if (!agent) {
       throw new SwitchboardError(
-        `There is no agent called ${agentId}. Available: ${Object.keys(this.config.agents).join(", ")}.`,
+        `There is no agent called ${agentId}. Available: ${access.agents.join(", ")}.`,
         "not_found",
       );
     }
-    const workspaces = this.workspaces();
+    const workspaces = this.workspaces(caller);
     const workspace = input.workspace
       ? workspaces.find((w) => w.id === input.workspace)
       : (workspaces.find((w) => w.default) ?? workspaces[0]);
@@ -109,6 +117,7 @@ export class SessionManager implements SessionManagerApi {
       cwd: workspace.path,
       ...(model && { model }),
       title: input.title?.trim() || prompt.split(/\s+/).slice(0, 6).join(" "),
+      ...(access.email && { owner: access.email }),
       state: "starting",
       createdAt: at,
       updatedAt: at,
@@ -122,8 +131,8 @@ export class SessionManager implements SessionManagerApi {
     return this.view(name);
   }
 
-  async send(session: string, message: string): Promise<SessionView> {
-    const row = this.require(session);
+  async send(session: string, message: string, caller?: Caller): Promise<SessionView> {
+    const row = this.require(session, resolveAccess(this.config, caller));
     const text = message?.trim();
     if (!text) throw new SwitchboardError("There is no message to send.", "bad_input");
     switch (row.state) {
@@ -152,8 +161,8 @@ export class SessionManager implements SessionManagerApi {
     return this.view(session);
   }
 
-  async respond(session: string, requestId: string, answer: string): Promise<SessionView> {
-    const row = this.require(session);
+  async respond(session: string, requestId: string, answer: string, caller?: Caller): Promise<SessionView> {
+    const row = this.require(session, resolveAccess(this.config, caller));
     const pending = row.pending;
     if (row.state !== "waiting" || !pending || pending.id !== requestId) {
       throw new SwitchboardError(
@@ -175,8 +184,12 @@ export class SessionManager implements SessionManagerApi {
     return this.view(session);
   }
 
-  async wait(session: string, opts: { cursor?: number; maxWaitMs?: number } = {}): Promise<WaitResult> {
-    this.require(session);
+  async wait(
+    session: string,
+    opts: { cursor?: number; maxWaitMs?: number } = {},
+    caller?: Caller,
+  ): Promise<WaitResult> {
+    this.require(session, resolveAccess(this.config, caller));
     const cursor = opts.cursor ?? Math.max(0, (this.store.lastSeqOfKind(session, "prompt") ?? 1) - 1);
     const maxWait = opts.maxWaitMs ?? this.config.max_wait;
 
@@ -199,16 +212,20 @@ export class SessionManager implements SessionManagerApi {
     return this.waitResult(session, cursor);
   }
 
-  list(filter: { state?: SessionState } = {}): SessionSummary[] {
-    return this.store.list(filter.state).map((row) => ({
-      ...this.viewOf(row),
-      ...(row.lastActivity && { lastActivity: row.lastActivity }),
-      ...(row.pending && { pending: row.pending }),
-    }));
+  list(filter: { state?: SessionState } = {}, caller?: Caller): SessionSummary[] {
+    const access = resolveAccess(this.config, caller);
+    return this.store
+      .list(filter.state)
+      .filter((row) => canSee(access, row.owner))
+      .map((row) => ({
+        ...this.viewOf(row),
+        ...(row.lastActivity && { lastActivity: row.lastActivity }),
+        ...(row.pending && { pending: row.pending }),
+      }));
   }
 
-  async stop(session: string, mode: "interrupt" | "close"): Promise<SessionView> {
-    const row = this.require(session);
+  async stop(session: string, mode: "interrupt" | "close", caller?: Caller): Promise<SessionView> {
+    const row = this.require(session, resolveAccess(this.config, caller));
     const proc = this.live.get(session);
     if (mode === "interrupt") {
       if ((row.state === "working" || row.state === "waiting") && proc?.session)
@@ -247,10 +264,16 @@ export class SessionManager implements SessionManagerApi {
     return this.now().toISOString();
   }
 
-  private require(session: string): SessionRow {
-    const row = this.store.get(session);
+  private require(session: string, access?: Access): SessionRow {
+    const found = this.store.get(session);
+    const row = found && (!access || canSee(access, found.owner)) ? found : undefined;
     if (!row) {
-      const names = this.store.names();
+      const names = access
+        ? this.store
+            .list()
+            .filter((r) => canSee(access, r.owner))
+            .map((r) => r.name)
+        : this.store.names();
       throw new SwitchboardError(
         `There is no session called ${session}.${names.length ? ` Sessions: ${names.join(", ")}.` : ""}`,
         "not_found",
@@ -459,7 +482,10 @@ export class SessionManager implements SessionManagerApi {
   }
 
   private notify(session: string, kind: "done" | "waiting" | "failed", text: string): void {
-    this.notifier.notify({ session, kind, text }).catch((err) => {
+    const owner = this.store.get(session)?.owner;
+    const chat =
+      owner && Object.hasOwn(this.config.users, owner) ? this.config.users[owner]?.notify_chat : undefined;
+    this.notifier.notify({ session, kind, text, ...(chat && { chat }) }).catch((err) => {
       console.error(`switchboard: notifier failed: ${messageOf(err)}`);
     });
   }

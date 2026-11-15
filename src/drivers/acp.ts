@@ -3,11 +3,14 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import type { Answer, ApprovalOption, PendingRequest, Question, StopReason } from "../types.js";
 import type { AgentSession, Driver, DriverEvent, DriverStartOptions } from "./driver.js";
+import { runAsInvocation } from "./run-as.js";
 
 export interface AcpDriverOptions {
   command: string[];
   env?: Record<string, string>;
   model?: string;
+  runAs?: string;
+  sudoPath?: string;
 }
 
 const STOP_REASONS: Record<acp.StopReason, StopReason> = {
@@ -80,8 +83,14 @@ class AcpSession implements AgentSession {
     private readonly start: DriverStartOptions,
   ) {
     const [cmd, ...args] = opts.command as [string, ...string[]];
-    this.child = spawn(cmd, args, {
-      cwd: start.cwd,
+    const inv = opts.runAs
+      ? runAsInvocation(
+          { user: opts.runAs, ...(opts.sudoPath ? { sudoPath: opts.sudoPath } : {}) },
+          { cwd: start.cwd, command: cmd, args, env: opts.env ?? {} },
+        )
+      : { command: cmd, args };
+    this.child = spawn(inv.command, inv.args, {
+      cwd: opts.runAs ? "/" : start.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "ignore"],
     });

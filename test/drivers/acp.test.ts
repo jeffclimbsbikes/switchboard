@@ -184,3 +184,33 @@ describe("acp driver specifics", () => {
     await expect(driver.start({ cwd: tmpdir(), onEvent: () => {} })).rejects.toThrow(/cannot start/);
   });
 });
+
+describe("AcpDriver with run_as", () => {
+  it("starts the agent through the sudo wrapper", async () => {
+    const fixtures = fileURLToPath(new URL("../fixtures/", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "fake-acp-runas-"));
+    const log = join(dir, "sudo.log");
+    process.env.FAKE_SUDO_LOG = log;
+    try {
+      const driver = new AcpDriver({
+        command: [process.execPath, agentPath],
+        env: { FAKE_ACP_STATE_DIR: dir, FAKE_ACP_RESUME_MODE: "resume" },
+        runAs: "diana",
+        sudoPath: join(fixtures, "fake-sudo.sh"),
+      });
+      const rec = new Recorder();
+      const session = await driver.start({ cwd: dir, onEvent: rec.push });
+      await session.prompt("hello");
+      await rec.waitFor(isTurnEnd);
+      await session.close();
+      const argv = readFileSync(log, "utf8").trim();
+      expect(argv).toMatch(
+        /^-n -u diana -H -- env FAKE_ACP_STATE_DIR=.* FAKE_ACP_RESUME_MODE=resume bash -c /,
+      );
+      expect(argv).toContain(` ${dir} ${process.execPath} ${agentPath}`);
+    } finally {
+      delete process.env.FAKE_SUDO_LOG;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

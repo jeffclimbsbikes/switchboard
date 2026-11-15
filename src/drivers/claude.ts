@@ -11,6 +11,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Answer, ApprovalOption, PendingRequest, Question, StopReason } from "../types.js";
 import type { AgentSession, Driver, DriverEvent, DriverStartOptions } from "./driver.js";
+import { spawnClaudeAs } from "./run-as.js";
 
 export interface ClaudeDriverOptions {
   executable?: string;
@@ -18,6 +19,8 @@ export interface ClaudeDriverOptions {
   permissionMode?: PermissionMode;
   appendSystemPrompt?: string;
   env?: Record<string, string>;
+  runAs?: string;
+  sudoPath?: string;
 }
 
 const APPROVAL_OPTIONS: ApprovalOption[] = [
@@ -121,7 +124,16 @@ class ClaudeSession implements AgentSession {
     this.q = query({
       prompt: this.input,
       options: {
-        cwd: opts.cwd,
+        cwd: driver.runAs ? "/" : opts.cwd,
+        ...(driver.runAs
+          ? {
+              spawnClaudeCodeProcess: spawnClaudeAs(
+                { user: driver.runAs, ...(driver.sudoPath ? { sudoPath: driver.sudoPath } : {}) },
+                opts.cwd,
+                driver.env ?? {},
+              ),
+            }
+          : {}),
         permissionMode: mode,
         ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         ...(model ? { model } : {}),

@@ -14,6 +14,7 @@ export function createDrivers(config: Config): Record<string, Driver> {
           ...(agent.model ? { model: agent.model } : {}),
           permissionMode: agent.permission_mode,
           ...(agent.append_system_prompt ? { appendSystemPrompt: agent.append_system_prompt } : {}),
+          ...(agent.run_as ? { runAs: agent.run_as } : {}),
         });
         break;
       case "acp":
@@ -21,6 +22,7 @@ export function createDrivers(config: Config): Record<string, Driver> {
           command: agent.command,
           env: agent.env,
           ...(agent.model ? { model: agent.model } : {}),
+          ...(agent.run_as ? { runAs: agent.run_as } : {}),
         });
         break;
       case "fake":
