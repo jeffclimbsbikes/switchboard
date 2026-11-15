@@ -92,3 +92,21 @@ describe("createNotifier", () => {
     await expect(nullNotifier.notify(n)).resolves.toBeUndefined();
   });
 });
+
+describe("notifier retries", () => {
+  it("retries a network failure once", async () => {
+    const { createNotifier } = await import("../../src/core/notifier.js");
+    let calls = 0;
+    const fetchStub = (async () => {
+      calls++;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const n = createNotifier(
+      { telegram: { token_env: "T", chat: "1" }, nag_after: 600_000 },
+      { fetch: fetchStub, env: { T: "123:abc" }, retryDelayMs: 1 },
+    );
+    await n.notify({ session: "otter", kind: "done", text: "hi" });
+    expect(calls).toBe(2);
+  });
+});

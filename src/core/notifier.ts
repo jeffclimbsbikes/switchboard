@@ -17,10 +17,20 @@ export interface NotifierDeps {
   fetch?: typeof fetch;
   spawn?: typeof nodeSpawn;
   env?: NodeJS.ProcessEnv;
+  retryDelayMs?: number;
 }
 
 export function createNotifier(config: NotifyConfig, deps: NotifierDeps = {}): Notifier {
-  const doFetch = deps.fetch ?? fetch;
+  const rawFetch = deps.fetch ?? fetch;
+  const retryDelayMs = deps.retryDelayMs ?? 1_000;
+  const doFetch: typeof fetch = async (input, init) => {
+    try {
+      return await rawFetch(input, init);
+    } catch {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+      return rawFetch(input, init);
+    }
+  };
   const doSpawn = deps.spawn ?? nodeSpawn;
   const env = deps.env ?? process.env;
   const channels: ((n: Notification, message: string) => Promise<void>)[] = [];
