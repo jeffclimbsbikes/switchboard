@@ -78,9 +78,19 @@ function check(config: Config): boolean {
     console.log(`agent ${id}: ${agent.driver} → ${cmd} ${found ? "✓" : "✗ not found"}`);
   }
   for (const w of workspaces(config)) {
-    const found = existsSync(w.path) && statSync(w.path).isDirectory();
-    ok &&= found;
-    console.log(`workspace ${w.id}: ${w.path} ${found ? "✓" : "✗ missing"}`);
+    let status: "ok" | "missing" | "unreadable";
+    try {
+      status = statSync(w.path).isDirectory() ? "ok" : "missing";
+    } catch (err) {
+      status = (err as NodeJS.ErrnoException).code === "EACCES" ? "unreadable" : "missing";
+    }
+    ok &&= status !== "missing";
+    const mark = {
+      ok: "✓",
+      missing: "✗ missing",
+      unreadable: "? not readable by this user (fine for run_as agents)",
+    };
+    console.log(`workspace ${w.id}: ${w.path} ${mark[status]}`);
   }
   console.log(
     `auth: ${config.auth.login} · listen ${config.listen}${config.public_url ? ` · ${config.public_url}` : ""}`,
