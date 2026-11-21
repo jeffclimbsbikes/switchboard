@@ -238,7 +238,7 @@ describe("AcpDriver with run_as", () => {
       const driver = new AcpDriver({
         command: [process.execPath, agentPath],
         env: { FAKE_ACP_STATE_DIR: dir, FAKE_ACP_RESUME_MODE: "resume" },
-        runAs: "diana",
+        runAs: "alice",
         sudoPath: join(fixtures, "fake-sudo.sh"),
       });
       const rec = new Recorder();
@@ -248,7 +248,7 @@ describe("AcpDriver with run_as", () => {
       await session.close();
       const argv = readFileSync(log, "utf8").trim();
       expect(argv).toMatch(
-        /^-n -u diana -H -- env FAKE_ACP_STATE_DIR=.* FAKE_ACP_RESUME_MODE=resume bash -c /,
+        /^-n -u alice -H -- env FAKE_ACP_STATE_DIR=.* FAKE_ACP_RESUME_MODE=resume bash -c /,
       );
       expect(argv).toContain(` ${dir} ${process.execPath} ${agentPath}`);
     } finally {

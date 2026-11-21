@@ -37,8 +37,8 @@ for i, (name, s, col, w) in enumerate(layers):
             f"<b style='font-size:14px;color:#1e1b4b'>{name}</b><br><span style='font-size:11px;color:#312e81'>{s}</span>")
 
 # manual
-d.zone(910, 660, 710, 220, "on demand, not in CI", "muted", "needs real logins; run by hand on the Pi")
+d.zone(910, 660, 710, 220, "on demand, not in CI", "muted", "needs real logins; run by hand on a real server")
 d.box(935, 720, 320, 130, "live smoke", "agent", "real Claude Code (haiku) + real opencode: start, question, resume. Also refreshes the recorded fixtures fake-claude replays.", icon="🔥")
-d.box(1275, 720, 320, 130, "connector check", "claude", "add build.rutang.cloud/mcp in claude.ai, run one task by text and one by voice", icon="📱")
+d.box(1275, 720, 320, 130, "connector check", "claude", "add switchboard.example.com/mcp in claude.ai, run one task by text and one by voice", icon="📱")
 
 d.save()

@@ -1,6 +1,6 @@
 # 04 - Agent CLI probe: driving Claude Code and OpenCode programmatically
 
-Probed 2026-11-14 on this Mac. Installed: `claude` 2.1.325 (not .319), `opencode` v2.1.4 (Homebrew). Model for all Claude calls: `--model haiku` (resolves to `claude-haiku-5-5`). Total spend about 0.01 USD. No opencode model prompts were run. Raw captures are in `scratch/`.
+Probed 2026-11-14 on this Mac. Installed: `claude` 2.1.325 (not .319), `opencode` v2.1.4 (Homebrew). Model for all Claude calls: `--model haiku` (resolves to `claude-haiku-5-5`). Total spend about 0.01 USD. No opencode model prompts were run. Raw captures were not kept in the repo.
 
 Isolation flags used for every Claude call: `--setting-sources "" --strict-mcp-config` (plus `--tools ""` or `--tools Bash`), `</dev/null` when not using stdin input, cwd `/tmp/cc1`.
 
@@ -13,7 +13,7 @@ claude -p "reply with the word ok" --model haiku --output-format stream-json --v
   --session-id <uuid> --setting-sources "" --strict-mcp-config --tools "" </dev/null
 ```
 
-`--verbose` is required with `stream-json`. Event sequence (newline-delimited JSON, `scratch/cc-basic.jsonl`):
+`--verbose` is required with `stream-json`. Event sequence (newline-delimited JSON):
 
 | line `type` / `subtype` | Notes |
 |---|---|
@@ -30,7 +30,7 @@ Token-level streaming: add `--include-partial-messages` for `stream_event` lines
 
 ### 1.2 Multi-turn on one process (`--input-format stream-json`)
 
-Works. One process, two user lines on stdin with a pause between them (`scratch/cc-multiturn.jsonl`):
+Works. One process, two user lines on stdin with a pause between them:
 
 ```
 {"type":"user","message":{"role":"user","content":"remember the number 7, reply ok"}}
@@ -59,7 +59,7 @@ Output: `system init`, `user` (replayed, `isReplay:true`), `assistant "ok"`, `re
 Findings, each tested with `--tools Bash` and the prompt "run: echo hello > f.txt":
 
 1. **Plain `-p`, no flags (default mode)**: tool is denied automatically. The `tool_result` has `is_error:true` ("Output redirection ... needs approval"), the file is not created, and `result.permission_denials[]` lists `{tool_name, tool_use_id, tool_input}`. The model usually replies with text asking for approval. Detection = denials in `result` after the turn; no way to approve mid-turn. `--permission-prompts none` makes this explicit; `host` is the other value.
-2. **`--permission-prompt-tool stdio` with `--input-format stream-json`** (best fit for us; see `scratch/drive_stdio.py`, `scratch/cc-perm-stdio.txt`). Claude emits on stdout:
+2. **`--permission-prompt-tool stdio` with `--input-format stream-json`** (best fit for us). Claude emits on stdout:
    ```
    {"type":"control_request","request_id":"642b24bf-...","request":{"subtype":"can_use_tool","tool_name":"Bash",
      "display_name":"Bash","input":{"command":"echo hello > f.txt","description":"..."},"description":"...",
@@ -74,7 +74,7 @@ Findings, each tested with `--tools Bash` and the prompt "run: echo hello > f.tx
      "response":{"behavior":"allow","updatedInput":{...original input...}}}}
    ```
    Result: tool ran, file created, `permission_denials` empty. Deny is `{"behavior":"deny","message":"..."}` (standard SDK shape; allow path verified, deny not run). The turn blocks until we answer, so the MCP server can hold it open while a human decides. `permission_suggestions` can be echoed back (`updatedPermissions`) to implement "always allow".
-3. **`--permission-prompt-tool mcp__<server>__<tool>`** with `--mcp-config`: also works. Tool is called with `{tool_name, input, tool_use_id}` (verified with a 20-line stdio MCP server, `scratch/approve_mcp.py`) and returns text content that is JSON `{"behavior":"allow","updatedInput":{...}}`. File was created. Less rich than stdio (no suggestions/blocked_path) and requires a separate MCP process, so stdio is preferred.
+3. **`--permission-prompt-tool mcp__<server>__<tool>`** with `--mcp-config`: also works. Tool is called with `{tool_name, input, tool_use_id}` (verified with a 20-line stdio MCP server) and returns text content that is JSON `{"behavior":"allow","updatedInput":{...}}`. File was created. Less rich than stdio (no suggestions/blocked_path) and requires a separate MCP process, so stdio is preferred.
 4. **`--allowedTools "Bash(echo *)"`**: did NOT unblock `echo hello > f.txt`. The redirect triggers a separate write/path check that rules on the command prefix do not cover; still denied. Allow rules are fragile for shell. `--permission-mode acceptEdits|auto|dontAsk|plan|bypassPermissions|manual` exist (`--dangerously-skip-permissions` too); not individually run.
 5. **AskUserQuestion**:
    - Plain `-p`: tool is not offered. The model ran ToolSearch (`select:AskUserQuestion`, "No matching deferred tools found") and asked in plain text instead. With `--tools AskUserQuestion` over stdio it exists.
@@ -83,7 +83,7 @@ Findings, each tested with `--tools Bash` and the prompt "run: echo hello > f.tx
 
 ### 1.5 Cancel
 
-On a `-p --input-format stream-json` process (`scratch/interrupt.py`, `scratch/cc-interrupt.txt`): send
+On a `-p --input-format stream-json` process: send
 ```
 {"type":"control_request","request_id":"int1","request":{"subtype":"interrupt"}}
 ```
@@ -109,8 +109,8 @@ This is the new v2 CLI (not the old `opencode run/serve` of 0.x/1.x); flags belo
 - `opencode run [message...]`: flags `--format default|json`, `--session/-s <id>` ("continue, or create if it does not exist", so caller-chosen ids), `--continue/-c`, `--fork`, `--model/-m provider/model#variant`, `--agent`, `--file/-f`, `--title`, `--thinking`, `--auto` ("auto-approve permissions not explicitly denied"), `--server <url>`, `--standalone` (private server instead of the background service). No interactive permission path in `run` apart from `--auto`.
 - Architecture: every command talks to a **background service** (`opencode service start|status|stop|restart|get`). A service was already running here (`opencode service status` -> `http://127.0.0.1:49374`, process `opencode serve --service`). `opencode api <operationId | METHOD path> [-d body] [--param k=v]` calls it from the shell; `opencode pair`, `opencode mini` exist.
 - `opencode acp`: "Start an Agent Client Protocol server" (flag `--login` only). Not exercised. 
-- `opencode serve [--hostname --port --cors --service --stdio]`: "Start the v2 API and web server". Started on `127.0.0.1:47214`; prints `server listening on http://127.0.0.1:47214` and **`server password <random>`** (credential redacted in `scratch/oc-serve.log`). Auth: HTTP Basic with username `opencode` and that password returns 200; no/other auth returns `401 {"_tag":"UnauthorizedError"}`; Bearer did not work. Server killed afterwards (the pre-existing service was left alone).
-- OpenAPI: `GET /openapi.json` (OpenAPI 3.1, "opencode HttpApi", 124 paths, saved to `scratch/oc-openapi.json`). `/doc` is an HTML page. API prefix is `/api`. Sessions exist already (`GET /api/session` -> `{"data":[...]}`, envelope `{"data": ...}`).
+- `opencode serve [--hostname --port --cors --service --stdio]`: "Start the v2 API and web server". Started on `127.0.0.1:47214`; prints `server listening on http://127.0.0.1:47214` and **`server password <random>`**. Auth: HTTP Basic with username `opencode` and that password returns 200; no/other auth returns `401 {"_tag":"UnauthorizedError"}`; Bearer did not work. Server killed afterwards (the pre-existing service was left alone).
+- OpenAPI: `GET /openapi.json` (OpenAPI 3.1, "opencode HttpApi", 124 paths). `/doc` is an HTML page. API prefix is `/api`. Sessions exist already (`GET /api/session` -> `{"data":[...]}`, envelope `{"data": ...}`).
 
 Endpoints relevant to us (operationId):
 
@@ -134,6 +134,3 @@ Models: `opencode models` lists `ollama-cloud/*` (e.g. `gpt-oss:20b`, `glm-5.3-f
 - Alternative for Claude: `@agentclientprotocol/claude-agent-acp` gives the same capabilities over ACP, and `opencode acp` would let one ACP client cover both agents. Worth a follow-up probe of both ACP servers (`session/new`, `session/prompt`, `session/request_permission`) before choosing between "native per-agent adapters" and "ACP only".
 - OpenCode: use the HTTP API (`serve` with Basic auth) rather than `run`; SSE for events, REST replies for permissions/forms. Needs an event-shape capture with a real (cheap) model before finalizing the mapping.
 - Gotchas: `--allowedTools` prefix rules do not cover shell redirects; `result.result` may be absent on abort; `system init` repeats each turn; slug uses the resolved path (`/private/tmp`); opencode server password is per-start.
-
-## Scratch files
-`scratch/cc-basic.jsonl`, `cc-multiturn.jsonl`, `cc-perm-default.jsonl`, `cc-askuser-p.jsonl`, `cc-perm-stdio.txt`, `cc-askuser-stdio.txt`, `cc-interrupt.txt`, `drive_stdio.py`, `interrupt.py`, `approve_mcp.py`, `oc-openapi.json`, `oc-serve.log` (password redacted).

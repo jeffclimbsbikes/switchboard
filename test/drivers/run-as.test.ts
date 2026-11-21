@@ -14,9 +14,9 @@ describe("run_as command construction", () => {
   it("wraps a command in sudo with the environment re-injected", () => {
     expect(
       runAsInvocation(
-        { user: "diana" },
+        { user: "alice" },
         {
-          cwd: "/home/diana/src",
+          cwd: "/home/alice/src",
           command: "claude",
           args: ["--flag", "a b"],
           env: { PATH: "/bin", CLAUDE_X: "1" },
@@ -27,7 +27,7 @@ describe("run_as command construction", () => {
       args: [
         "-n",
         "-u",
-        "diana",
+        "alice",
         "-H",
         "--",
         "env",
@@ -36,7 +36,7 @@ describe("run_as command construction", () => {
         "bash",
         "-c",
         WRAPPER,
-        "/home/diana/src",
+        "/home/alice/src",
         "claude",
         "--flag",
         "a b",
@@ -60,7 +60,7 @@ describe("run_as command construction", () => {
       passthroughEnv(
         {
           PATH: "/bin",
-          HOME: "/home/jeff",
+          HOME: "/home/owner",
           CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
           ANTHROPIC_API_KEY: "k",
           SWITCHBOARD_SESSION: "s",
@@ -95,7 +95,7 @@ describe("ClaudeDriver with run_as", () => {
     process.env.FAKE_SUDO_LOG = log;
     const driver = new ClaudeDriver({
       executable: join(fixtures, "fake-claude.mjs"),
-      runAs: "diana",
+      runAs: "alice",
       sudoPath: join(fixtures, "fake-sudo.sh"),
       env: { FAKE_CLAUDE_STATE: join(dir, "state") },
     });
@@ -111,7 +111,7 @@ describe("ClaudeDriver with run_as", () => {
     await session.close();
 
     const argv = readFileSync(log, "utf8").trim();
-    expect(argv).toMatch(/^-n -u diana -H -- env /);
+    expect(argv).toMatch(/^-n -u alice -H -- env /);
     expect(argv).toContain("FAKE_CLAUDE_STATE=");
     expect(argv).toContain(`bash -c ${WRAPPER} ${cwd} `);
   });

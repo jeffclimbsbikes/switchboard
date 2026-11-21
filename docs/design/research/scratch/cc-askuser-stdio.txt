@@ -1,7 +1,0 @@
-system init
-A [{"type": "tool_use", "id": "toolu_01W83ekxEnsGDsbn1iRN72cv", "name": "AskUserQuestion", "input": {"questions": [{"question": "Do you prefer cats or dogs?", "header": "Pet pref", "multiSelect": false, "options": [{"label": "Cats", "description": "You prefer cats."}, {"label": "Dogs", "description": 
-CONTROL_REQUEST {"type": "control_request", "request_id": "fb174484-6fbc-4185-bd1b-353ab357e19c", "request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "display_name": "AskUserQuestion", "input": {"questions": [{"question": "Do you prefer cats or dogs?", "header": "Pet pref", "options": [{"label": "Cats", "description": "You prefer cats."}, {"label": "Dogs", "description": "You prefer dogs."}], "multiSelect": false}]}, "tool_use_id": "toolu_01W83ekxEnsGDsbn1iRN72cv", "requires_user_interaction": true}}
-U [{"type": "tool_result", "content": "Your questions have been answered: \"Do you prefer cats or dogs?\"=\"Cats\". You can now continue with these answers in mind.", "tool_use_id": "toolu_01W83ekxEnsGDsbn1iRN72cv"}]
-rate_limit_event 
-A [{"type": "text", "text": "You prefer cats."}]
-R You prefer cats. []

@@ -120,7 +120,7 @@ Source: https://github.com/jmunroe/claude-sessions-mcp (README.md, docs/superpow
 1. **Run the Agent SDK in our own harness** (the Honk pattern) instead of scraping a TUI. `canUseTool` gives a structured pending-request object for approvals and `AskUserQuestion`. Resolve it with `answer_request(session_id, request_id, allow|deny|answers)`.
 2. **Treat "blocked" as first-class state.** Session status should be `running | idle | blocked(request) | done | error`. A turn call returns early with the pending request instead of timing out.
 3. **Bounded waits.** Cap `wait_seconds` below the connector timeout, and return "still working" plus a cursor. Offer a long-poll wait tool, backed by resumable SSE with sequence guards (claude-sessions-mcp).
-4. **Server-chosen session IDs** and the transcript/result event as the source of truth, with `stop_reason` and `result` text as turn-end. Keep session state on disk on the Pi so the service restarts cleanly.
+4. **Server-chosen session IDs** and the transcript/result event as the source of truth, with `stop_reason` and `result` text as turn-end. Keep session state on disk on the server so the service restarts cleanly.
 5. **Per-task git worktrees** (Xirp, Claude Squad), with an explicit permission mode per session.
 6. **Policy per tool** (Omnara): allow, ask or deny rules, plus a hard refusal of `bypassPermissions` unless the user opts in per session.
 7. **Spawn ceiling** and fail-closed counting, plus tags or metadata on sessions we created.

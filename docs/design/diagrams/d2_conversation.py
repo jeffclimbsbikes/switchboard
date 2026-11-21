@@ -6,9 +6,9 @@ X = {"you": 130, "claude": 450, "sb": 820, "cc": 1180, "tg": 1440}
 heads = [
     ("you", "You", "voice, on the phone", "🎙️", "user"),
     ("claude", "Claude", "claude.ai voice chat", "✨", "claude"),
-    ("sb", "switchboard", "on the Pi", "🎛️", "sb"),
+    ("sb", "switchboard", "on your server", "🎛️", "sb"),
     ("cc", "Claude Code", "session “otter”", "🤖", "agent"),
-    ("tg", "Telegram", "", "📨", "user"),
+    ("tg", "Notifier", "Telegram · ntfy · command", "📨", "user"),
 ]
 
 # phase bands
@@ -47,26 +47,26 @@ def note(k, y, s, w=260, color="#334155"):
 
 
 msg("you", "claude", 150, "“Build us a packing list app for the trip”", "#ea580c")
-msg("claude", "sb", 195, "start(agent: claude, workspace: pidev, prompt: …)", "#6366f1", mono=True)
-msg("sb", "cc", 215, "new session · Opus 5.5", "#8b5cf6")
-msg("sb", "claude", 255, "otter · working · “reading the pidev-apps guide”", "#6366f1", dashed=True, mono=True)
+msg("claude", "sb", 195, "start(agent: claude, workspace: app, prompt: …)", "#6366f1", mono=True)
+msg("sb", "cc", 215, "new session", "#8b5cf6")
+msg("sb", "claude", 255, "otter · working · “reading the repo”", "#6366f1", dashed=True, mono=True)
 msg("claude", "you", 285, "“On it. It's planning; I'll check in.”", "#d97757", dashed=True)
 
-msg("cc", "sb", 335, "AskUserQuestion: shared with Diana, or just you?", "#7c3aed")
+msg("cc", "sb", 335, "AskUserQuestion: share it with Alice, or just you?", "#7c3aed")
 msg("claude", "sb", 380, "wait(otter)", "#6366f1", mono=True)
-msg("sb", "claude", 410, "waiting · question q1 · options [just Jeff, both]", "#6366f1", dashed=True, mono=True)
-msg("claude", "you", 440, "“Quick one from the Pi: just you, or Diana too?”", "#d97757", dashed=True)
+msg("sb", "claude", 410, "waiting · question q1 · options [just me, both]", "#6366f1", dashed=True, mono=True)
+msg("claude", "you", 440, "“Quick one: just you, or Alice too?”", "#d97757", dashed=True)
 msg("you", "claude", 480, "“Both of us”", "#ea580c")
 msg("claude", "sb", 510, "respond(otter, q1, “both”)", "#6366f1", mono=True)
 msg("sb", "cc", 530, "answer → agent continues", "#8b5cf6")
 
-d.text(X["cc"] - 330, 585, 300, 40, "pidev-app new packing → build → up<br>tests it through the router", size=11, color="#0c4a6e", align="right")
+d.text(X["cc"] - 330, 585, 300, 40, "scaffold → build → deploy<br>runs the tests", size=11, color="#0c4a6e", align="right")
 msg("claude", "sb", 640, "wait(otter)  · returns every ≤ 25 s", "#6366f1", mono=True)
 msg("sb", "claude", 670, "working · “deploying, 2 of 3 checks pass”", "#6366f1", dashed=True, mono=True)
 note("claude", 700, "or you hang up — nothing is lost", 260, "#7a2e14")
 
-msg("cc", "sb", 800, "turn ended · “Live at packing.rutang.cloud”", "#7c3aed")
-msg("sb", "tg", 840, "✅ otter: packing.rutang.cloud", "#ea580c")
+msg("cc", "sb", 800, "turn ended · “Live at packing.example.com”", "#7c3aed")
+msg("sb", "tg", 840, "✅ otter: packing.example.com", "#ea580c")
 d.line(X["tg"], 870, X["you"], 870, color="#ea580c", w=2, dashed=True, end="blockThin",
        label="push on your phone (if nobody was waiting)", size=12)
 

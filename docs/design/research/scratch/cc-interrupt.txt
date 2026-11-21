@@ -1,9 +1,0 @@
-system init
-system status
-sample stream_event: {"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","id":"msg_011Ch3bd6CpwA58KvNeC7dKS","type":"message","role":"assistant","content":[],"container":null,"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":
-CTRL_RESP {"type":"control_response","response":{"subtype":"success","request_id":"int1","response":{"still_queued":[]}}}
-
-assistant 
-user 
-RESULT {'subtype': 'error_during_execution', 'is_error': True, 'terminal_reason': 'aborted_streaming', 'stop_reason': None} 
-NEXT TURN ok

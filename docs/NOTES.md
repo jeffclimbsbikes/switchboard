@@ -3,18 +3,18 @@
 Goal: an MCP server that is the control plane for coding-agent sessions
 (Claude Code first, any agent like OpenCode next): start, list, prompt,
 resume, answer questions, stop. Remote connector for claude.ai (voice too),
-self-hosted on pidev behind Cloudflare. Simple to add; configure where the
+self-hosted on your own server behind Cloudflare. Simple to add; configure where the
 agent executable is.
 
-## Requirements (from Jeff, 2026-11-14)
+## Requirements (from the owner, 2026-11-14)
 - Voice Claude delegates to Claude Code, real back-and-forth: Claude Code can
-  ask questions; voice answers from context or asks Jeff in real time.
+  ask questions; voice answers from context or asks the owner in real time.
 - "Fully fledged, legit" connector auth from claude.ai.
-- Tell Jeff when a job is done.
+- Tell the owner when a job is done.
 - Agent-agnostic (Claude Code, OpenCode, ...). Build our own; take ideas from
   claude-code-rc-mcp, claude-sessions-mcp, Spotify's thing ("XIRP"?).
 - Tests + CI with no secrets.
-- Design doc in Trove: draw.io diagrams, one whole-system diagram, few words.
+- Design doc: draw.io diagrams, one whole-system diagram, few words.
 
 ## Log
 - 14:20 research 01 (prior art) + 02 (protocols) in. Spotify's thing = **Xirp**
@@ -36,8 +36,8 @@ agent executable is.
   no elicitation/Tasks/standing GET stream → own poll pattern; Tunnel 524 after
   100s silence. Access Managed OAuth fails with claude.ai (#410) → avoid.
 - Decision: switchboard = own OAuth 2.1 AS + resource server. Exact-host Access app
-  build.rutang.cloud = bypass (we check bearer); path app /authorize = Jeff only +
-  WARP (he authorizes from his own WARP device); verify Cf-Access-Jwt-Assertion.
+  switchboard.example.com = bypass (we check bearer); path app /authorize = owner only +
+  WARP (the owner authorizes from their own WARP device); verify Cf-Access-Jwt-Assertion.
   WAF skip for 160.79.104.0/21. Verify precedence after apply. Voice + custom
   connectors: unconfirmed (open bug) → test day one; Telegram covers "done".
 - 14:50 research 04 (CLI probe) in. claude 2.1.325: stream-json in/out multi-turn
@@ -52,12 +52,11 @@ agent executable is.
 - Diagram 1 (system) done.
 - 15:30 diagrams 1-7 done (design/diagrams/d*_*.py → drawio CLI → svg with
   embedded source, png previews). Page: design/site/index.html.
-  Published: https://trove.rutang.cloud/switchboard-design (zip site, preview card).
-  Rebuild: `cd design/diagrams && for f in d*_*.py; do python3 $f; done`, copy
-  svg+drawio into site/diagrams, zip site, upload with if_match.
+  Rebuild: `cd docs/design/diagrams && for f in d*_*.py; do python3 $f; done`, copy
+  svg+drawio into site/diagrams.
 
 ## Next (build order)
 1. core + tools + FakeDriver over stdio   2. ClaudeDriver (+ fake-claude)
-3. HTTP + OAuth (+ test JWKS)              4. Pi: systemd, Terraform, Telegram; voice test
+3. HTTP + OAuth (+ test JWKS)              4. server: systemd, Terraform, Telegram; voice test
 5. AcpDriver (OpenCode spike first)        6. worktrees, per-tool rules, app link
-Day-one spike: stub connector on build.rutang.cloud to test voice + timeouts.
+Day-one spike: stub connector on switchboard.example.com to test voice + timeouts.

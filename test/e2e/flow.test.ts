@@ -90,7 +90,7 @@ describe("end to end: claude.ai-style client over HTTP + OAuth, real core, fake 
   });
 
   it("runs a whole conversation: question, answer, follow-up, approval, stop", async () => {
-    const started = await call("start", { prompt: "ask Just you, or Diana too? | just me | both" });
+    const started = await call("start", { prompt: "ask Just you, or Alice too? | just me | both" });
     const session = started.structuredContent.session as string;
     let s = started.structuredContent;
     if (s.state !== "waiting") s = (await call("wait", { session, cursor: s.cursor })).structuredContent;

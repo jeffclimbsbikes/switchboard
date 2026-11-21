@@ -242,19 +242,19 @@ describe("usage hint and visibility", () => {
     const { manager, usage } = setup(
       {
         usage: { ollama: {} },
-        users: { "diana@example.com": { agents: ["plain"] }, "ollie@example.com": { agents: ["oc"] } },
+        users: { "alice@example.com": { agents: ["plain"] }, "ollie@example.com": { agents: ["oc"] } },
       },
       fakeOllama().fetch,
     );
     const view = await manager.start({ prompt: "go", agent: "cl" });
     await manager.wait(view.session, { maxWaitMs: 1000 });
     await usage.refreshOllama();
-    expect(manager.usageHint({ email: "diana@example.com" })).toBeUndefined();
+    expect(manager.usageHint({ email: "alice@example.com" })).toBeUndefined();
     expect(manager.usageHint({ email: "ollie@example.com" })).toBe(
       "Usage: Ollama: Pro, 412 requests this week",
     );
     expect(manager.usageHint()).toContain("Claude plan: 5-hour 34%");
-    const snap = manager.snapshot({ email: "diana@example.com" });
+    const snap = manager.snapshot({ email: "alice@example.com" });
     expect(snap.usage.claude).toBeUndefined();
     expect(snap.usage.ollama).toBeUndefined();
     expect(snap.usage.sessions).toEqual([]);
@@ -278,7 +278,7 @@ function fakeOllama(over: { me?: () => Response; usage?: () => Response } = {}) 
     if (url.endsWith("/api/me")) {
       return (
         over.me?.() ??
-        json({ id: "u_123", email: "jeff@example.com", name: "Jeff Aronhalt", Plan: "pro", avatar: "x" })
+        json({ id: "u_123", email: "owner@example.com", name: "Olive Owner", Plan: "pro", avatar: "x" })
       );
     }
     return over.usage?.() ?? json({ usage: days, total: { request_count: 412 } });
@@ -301,7 +301,7 @@ describe("Ollama poller", () => {
     expect(o?.days).toHaveLength(7);
     expect(o?.days.at(-1)).toEqual({ date: "2026-11-13", requests: 100 });
     const raw = JSON.stringify(o);
-    for (const secret of ["jeff@example.com", "Jeff", "u_123", "sk-test", "avatar"]) {
+    for (const secret of ["owner@example.com", "Olive", "u_123", "sk-test", "avatar"]) {
       expect(raw).not.toContain(secret);
     }
     expect(mock.calls.map((c) => [c.url, c.auth])).toEqual([

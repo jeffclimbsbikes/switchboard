@@ -11,7 +11,7 @@ import {
 
 const minimal = {
   agents: { claude: { driver: "claude" } },
-  workspaces: { pidev: "/srv/pidev" },
+  workspaces: { app: "/srv/app" },
 };
 
 describe("config", () => {
@@ -22,7 +22,7 @@ describe("config", () => {
     expect(c.auth).toEqual({ login: "none" });
     expect(c.notify.nag_after).toBe(600_000);
     expect(defaultAgentId(c)).toBe("claude");
-    expect(workspaces(c)).toEqual([{ id: "pidev", path: "/srv/pidev", default: true }]);
+    expect(workspaces(c)).toEqual([{ id: "app", path: "/srv/app", default: true }]);
   });
 
   it("accepts descriptions on agents and workspaces", () => {

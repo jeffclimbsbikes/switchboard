@@ -13,8 +13,8 @@ driver = "claude"
 model = "opus"
 # description = "Strongest model; best for hard or open-ended work."   # shown to the client by the agents tool (max 300 chars)
 permission_mode = "default"            # or acceptEdits, plan, bypassPermissions, …
-# append_system_prompt = "You are working on my home server."
-# run_as = "diana"                     # run this agent as another Unix user via sudo -n -u (claude and acp)
+# append_system_prompt = "You are working on my server."
+# run_as = "alice"                     # run this agent as another Unix user via sudo -n -u (claude and acp)
 
 # Any Agent Client Protocol agent:
 # [agents.opencode]
@@ -34,8 +34,8 @@ home = "~/src/my-project"
 # home = { path = "~/src/my-project", description = "My main project", default = true }
 
 # Restrict specific people (by sign-in email). Everyone not listed stays unrestricted.
-# [users."diana@example.com"]
-# agents = ["diana"]                    # omit for all agents
+# [users."alice@example.com"]
+# agents = ["alice"]                    # omit for all agents
 # workspaces = ["home"]                 # omit for all workspaces
 # notify_chat = "123456789"             # Telegram chat for her sessions' notifications
 

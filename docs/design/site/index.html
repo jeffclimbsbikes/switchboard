@@ -4,12 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>switchboard design</title>
-<meta name="description" content="An MCP server that lets regular Claude (even by voice) start, steer and resume Claude Code or any ACP agent on the Pi, with real back-and-forth and legit OAuth behind Cloudflare.">
-<meta name="trove:stat" content="Tools: 7">
-<meta name="trove:stat" content="Drivers: Claude SDK + ACP">
-<meta name="trove:stat" content="Max wait per call: 25 s">
-<meta name="trove:stat" content="Secrets in CI: 0">
-<meta name="trove:stat" content="Diagrams: 7">
+<meta name="description" content="An MCP server that lets regular Claude (even by voice) start, steer and resume Claude Code or any ACP agent on your own server, with real back-and-forth and legit OAuth behind Cloudflare.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
@@ -93,7 +88,7 @@
   <div class="wrap">
     <div class="eyebrow">Design · switchboard v0.1 · Nov 2026</div>
     <h1><span>switchboard</span></h1>
-    <p class="lede">Talk to Claude, by voice if you like. It hands the work to a real coding agent on your Pi, relays the agent's questions back to you, and tells you when it's done.</p>
+    <p class="lede">Talk to Claude, by voice if you like. It hands the work to a real coding agent on your own server, relays the agent's questions back to you, and tells you when it's done.</p>
     <ul class="chips">
       <li><b>MCP server</b> · a control plane for coding-agent sessions</li>
       <li><b>Claude Code</b> first · any <b>ACP</b> agent next (OpenCode, Codex, Gemini)</li>
@@ -105,7 +100,7 @@
 
 <nav class="toc" aria-label="Sections"><div class="wrap">
   <a href="#system">The whole system</a><a href="#conversation">A conversation</a><a href="#inside">Inside</a>
-  <a href="#tools">Tools &amp; config</a><a href="#lifecycle">Lifecycle</a><a href="#auth">Auth &amp; Cloudflare</a>
+  <a href="#tools">Tools &amp; config</a><a href="#more">Dashboard, models, people</a><a href="#lifecycle">Lifecycle</a><a href="#auth">Auth &amp; Cloudflare</a>
   <a href="#testing">Testing</a><a href="#prior-art">Prior art</a><a href="#plan">Unknowns &amp; plan</a>
 </div></nav>
 
@@ -113,16 +108,16 @@
 
 <section id="system">
   <h2>The whole system</h2>
-  <p class="sub">Follow the numbers. Claude never touches the Pi directly: every step is a short tool call through Cloudflare to switchboard, which drives the agent.</p>
+  <p class="sub">Follow the numbers. Claude never touches your server directly: every step is a short tool call through Cloudflare to switchboard, which drives the agent.</p>
   <figure id="fig-system">
-    <a class="zoom" href="diagrams/1-system.svg" target="_blank" rel="noopener"><img src="diagrams/1-system.svg" alt="Whole system: you, Anthropic, Cloudflare edge, and pidev with switchboard, coding agents and workspace"></a>
+    <a class="zoom" href="diagrams/1-system.svg" target="_blank" rel="noopener"><img src="diagrams/1-system.svg" alt="Whole system: you, Anthropic, Cloudflare edge, and your server with switchboard, coding agents and the things they work on"></a>
     <figcaption><span>Click to open full size</span><a href="diagrams/1-system.drawio" download>1-system.drawio</a></figcaption>
   </figure>
 </section>
 
 <section id="conversation">
   <h2>A conversation</h2>
-  <p class="sub">The agent can ask; Claude answers from what you already said, or asks you out loud. Hang up mid-build and nothing is lost: Telegram pings you when it's done.</p>
+  <p class="sub">The agent can ask; Claude answers from what you already said, or asks you out loud. Hang up mid-build and nothing is lost: a notification (Telegram, ntfy or a command) pings you when it's done.</p>
   <figure id="fig-conversation">
     <a class="zoom" href="diagrams/2-conversation.svg" target="_blank" rel="noopener"><img src="diagrams/2-conversation.svg" alt="Sequence: you, Claude, switchboard, Claude Code, Telegram, including a clarifying question"></a>
     <figcaption><span>One session, five phases</span><a href="diagrams/2-conversation.drawio" download>2-conversation.drawio</a></figcaption>
@@ -159,13 +154,13 @@
     </div>
 <pre class="cfg"><span class="c"># ~/.config/switchboard/config.toml</span>
 <span class="k">listen</span>     = <span class="s">"127.0.0.1:8787"</span>
-<span class="k">public_url</span> = <span class="s">"https://build.rutang.cloud"</span>
+<span class="k">public_url</span> = <span class="s">"https://switchboard.example.com"</span>
 <span class="k">max_wait</span>   = <span class="s">"25s"</span>
 
 <span class="h">[agents.claude]</span>
 <span class="k">driver</span>     = <span class="s">"claude"</span>
-<span class="k">executable</span> = <span class="s">"/home/jeff/.local/bin/claude"</span>
-<span class="k">model</span>      = <span class="s">"opus"</span>               <span class="c"># Opus 5.5</span>
+<span class="k">executable</span> = <span class="s">"~/.local/bin/claude"</span>
+<span class="k">model</span>      = <span class="s">"opus"</span>               <span class="c"># or sonnet, haiku</span>
 <span class="k">permission_mode</span> = <span class="s">"bypassPermissions"</span>
 
 <span class="h">[agents.opencode]</span>
@@ -173,17 +168,28 @@
 <span class="k">command</span> = [<span class="s">"opencode"</span>, <span class="s">"acp"</span>]
 
 <span class="h">[workspaces]</span>
-<span class="k">pidev</span> = <span class="s">"/home/jeff/src/pidev"</span>
+<span class="k">site</span> = <span class="s">"~/src/my-site"</span>
 
 <span class="h">[auth]</span>                      <span class="c"># off for stdio</span>
 <span class="k">login</span> = <span class="s">"cloudflare-access"</span>
-<span class="k">team</span>  = <span class="s">"rutang"</span>
+<span class="k">team</span>  = <span class="s">"your-team"</span>
 <span class="k">aud</span>   = <span class="s">"…"</span>                  <span class="c"># terraform output</span>
 <span class="k">allow</span> = [<span class="s">"you@example.com"</span>]
 
 <span class="h">[notify]</span>
 <span class="k">telegram</span>      = { <span class="k">token_env</span> = <span class="s">"TELEGRAM_BOT_TOKEN"</span>, <span class="k">chat</span> = <span class="s">"…"</span> }
 <span class="k">nag_after</span>     = <span class="s">"10m"</span>          <span class="c"># unanswered question</span></pre>
+  </div>
+</section>
+
+<section id="more">
+  <h2>Dashboard, models, usage and people</h2>
+  <p class="sub">Beyond the seven tools, the same process serves a read-only dashboard and can share one install between several people.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Dashboard</h3><p><code>/dashboard</code> is a phone-friendly, no-build page: live counts, sessions by state with their pending questions, per-session event timelines, the MCP contract clients see, and connected clients. It sits behind the same Access application as <code>/authorize</code>.</p></div>
+    <div class="card"><h3>Model catalogs</h3><p>An agent can list the models it offers, with optional prices per million tokens. The <code>agents</code> tool shows them, and <code>start({ model })</code> must pick one, so the client can weigh cost against difficulty.</p></div>
+    <div class="card"><h3>Usage</h3><p>Per-session cost and tokens from the drivers, Claude plan windows (5-hour, 7-day) from rate-limit events, and an optional Ollama usage poller. The <code>agents</code> tool ends with a one-line hint so the client can steer toward a cheaper agent.</p></div>
+    <div class="card"><h3>Multiple people</h3><p>List a person under <code>[users]</code> to limit which agents and workspaces they see, and to hide everyone else's sessions. A <code>run_as</code> agent runs as another Unix user, so a guest's agent has that user's files, credentials and permissions, not yours.</p></div>
   </div>
 </section>
 
@@ -205,14 +211,14 @@
   </figure>
   <div style="height:16px"></div>
   <figure id="fig-cloudflare">
-    <a class="zoom" href="diagrams/6-cloudflare.svg" target="_blank" rel="noopener"><img src="diagrams/6-cloudflare.svg" alt="Cloudflare routing decisions, tunnel ingress, Pi services, Terraform resources"></a>
-    <figcaption><span>Routing + the Terraform we add</span><a href="diagrams/6-cloudflare.drawio" download>6-cloudflare.drawio</a></figcaption>
+    <a class="zoom" href="diagrams/6-cloudflare.svg" target="_blank" rel="noopener"><img src="diagrams/6-cloudflare.svg" alt="Cloudflare routing decisions, tunnel ingress, server services, Terraform resources"></a>
+    <figcaption><span>Routing + the Terraform you add</span><a href="diagrams/6-cloudflare.drawio" download>6-cloudflare.drawio</a></figcaption>
   </figure>
 </section>
 
 <section id="testing">
   <h2>Testing without secrets</h2>
-  <p class="sub">Every outside dependency has a stand-in, so CI runs the full flows (questions, resume, OAuth) with no keys. Real agents and the real connector are checked by hand on the Pi.</p>
+  <p class="sub">Every outside dependency has a stand-in, so CI runs the full flows (questions, resume, OAuth) with no keys. Real agents and the real connector are checked by hand on a real server.</p>
   <figure id="fig-testing">
     <a class="zoom" href="diagrams/7-testing.svg" target="_blank" rel="noopener"><img src="diagrams/7-testing.svg" alt="Real dependencies mapped to fakes; CI test layers; manual checks"></a>
     <figcaption><span>CI: GitHub Actions, Node 22 + 24</span><a href="diagrams/7-testing.drawio" download>7-testing.drawio</a></figcaption>
@@ -236,9 +242,9 @@
   <h2>Unknowns &amp; plan</h2>
   <p class="sub">Settle the risky bits first, with a stub server, before building the rest.</p>
   <div class="grid g2">
-    <div class="card risk"><div class="i">🎙️</div><div><h3>Voice + custom connectors</h3><p>Voice mode can use tools, but there's an open report of custom connector tools failing in voice only. Test day one; Telegram covers “done” either way.</p></div></div>
+    <div class="card risk"><div class="i">🎙️</div><div><h3>Voice + custom connectors</h3><p>Voice mode can use tools, but there's an open report of custom connector tools failing in voice only. Test day one; notifications cover “done” either way.</p></div></div>
     <div class="card risk"><div class="i">⏱️</div><div><h3>Real tool-call timeout</h3><p>Docs say 240 s; some report 30–60 s. Default <code>max_wait</code> 25 s, configurable.</p></div></div>
-    <div class="card risk"><div class="i">🛡️</div><div><h3>Access precedence</h3><p>An exact-host bypass app should beat the <code>*.rutang.cloud</code> wildcard. Check with curl from off-WARP right after apply.</p></div></div>
+    <div class="card risk"><div class="i">🛡️</div><div><h3>Access precedence</h3><p>An exact-host bypass app should beat the <code>*.example.com</code> wildcard. Check with curl from outside your network right after apply.</p></div></div>
     <div class="card risk"><div class="i">🧩</div><div><h3>OpenCode event shapes</h3><p>How its questions surface over ACP is unprobed. A short spike before the ACP driver.</p></div></div>
   </div>
   <div style="height:22px"></div>
@@ -246,13 +252,13 @@
     <li><b>Core over stdio</b><span>tools, session manager, FakeDriver; usable from Claude Code on the Mac</span></li>
     <li><b>ClaudeDriver</b><span>Agent SDK, questions and approvals, resume; fake-claude + live smoke</span></li>
     <li><b>HTTP + OAuth</b><span>own AS, CIMD/DCR, Access JWT login, token tests</span></li>
-    <li><b>On the Pi</b><span>systemd, Terraform, Telegram; connect from claude.ai, try voice</span></li>
+    <li><b>On your server</b><span>systemd, Terraform, notifications; connect from claude.ai, try voice</span></li>
     <li><b>AcpDriver</b><span>OpenCode first, then Codex and Gemini by config</span></li>
     <li><b>Polish</b><span>worktree per session, per-tool rules, “open in Claude app” link</span></li>
   </ol>
 </section>
 
 </main>
-<footer class="wrap">Diagrams are draw.io files with the source embedded: open any SVG or .drawio in draw.io to edit. Research notes and decisions live in the switchboard repo (<code>NOTES.md</code>, <code>design/research/</code>).</footer>
+<footer class="wrap">Diagrams are draw.io files with the source embedded: open any SVG or .drawio in draw.io to edit. Research notes and decisions live in the switchboard repo (<code>docs/NOTES.md</code>, <code>docs/design/research/</code>).</footer>
 </body>
 </html>

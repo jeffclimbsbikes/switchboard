@@ -8,7 +8,7 @@ import { createHttpApp } from "../../src/http/server.js";
 import { createMcpServer, INSTRUCTIONS } from "../../src/mcp/server.js";
 import { AUD, baseConfig, exchange, getCode, type Harness, OWNER, pkce, register, TEAM } from "./harness.js";
 
-const DIANA = "diana@example.com";
+const ALICE = "alice@example.com";
 const TOOLS = ["agents", "respond", "send", "sessions", "start", "stop", "wait"];
 
 type Schema = {
@@ -29,7 +29,7 @@ async function boot(over: Record<string, unknown> = {}) {
     agents: { fake: { driver: "fake", default: true, description: "stand-in" }, other: { driver: "fake" } },
     workspaces: { w: "/tmp", side: "/var" },
     max_wait: 300,
-    auth: { login: "cloudflare-access", team: TEAM, aud: AUD, allow: [OWNER, DIANA] },
+    auth: { login: "cloudflare-access", team: TEAM, aud: AUD, allow: [OWNER, ALICE] },
     ...over,
   });
   const db = openDb(":memory:");
@@ -195,7 +195,7 @@ describe("dashboard state", () => {
   });
 
   it("lists grants for unrestricted users only", async () => {
-    const t = await boot({ users: { [DIANA]: { agents: ["other"], workspaces: ["side"] } } });
+    const t = await boot({ users: { [ALICE]: { agents: ["other"], workspaces: ["side"] } } });
     const { body: client } = await register(t.h);
     const { verifier, challenge } = pkce();
     const code = await getCode(t.h, client.client_id as string, challenge);
@@ -206,22 +206,22 @@ describe("dashboard state", () => {
     expect(admin.grants).toHaveLength(1);
     expect(admin.grants[0]).toMatchObject({ clientName: "Claude", email: OWNER });
     expect(admin.grants[0]).not.toHaveProperty("family");
-    const diana = (await (await t.get("/dashboard/api/state", await t.jwt({ email: DIANA }))).json()) as {
+    const alice = (await (await t.get("/dashboard/api/state", await t.jwt({ email: ALICE }))).json()) as {
       grants: unknown[];
     };
-    expect(diana.grants).toEqual([]);
+    expect(alice.grants).toEqual([]);
   });
 });
 
 describe("restricted users", () => {
   it("only see their own sessions, agents and workspaces", async () => {
-    const t = await boot({ users: { [DIANA]: { agents: ["other"], workspaces: ["side"] } } });
+    const t = await boot({ users: { [ALICE]: { agents: ["other"], workspaces: ["side"] } } });
     const mine = await t.manager.start(
       { prompt: "count", agent: "other", workspace: "side" },
-      { email: DIANA },
+      { email: ALICE },
     );
     const theirs = await t.manager.start({ prompt: "count" }, { email: OWNER });
-    await settled(t.manager, mine.session, { email: DIANA });
+    await settled(t.manager, mine.session, { email: ALICE });
 
     const view = async (email: string) =>
       (await (await t.get("/dashboard/api/state", await t.jwt({ email }))).json()) as {
@@ -233,7 +233,7 @@ describe("restricted users", () => {
         grants: unknown[];
         config: { auth: Record<string, unknown> };
       };
-    const d = await view(DIANA);
+    const d = await view(ALICE);
     expect(d.viewer.restricted).toBe(true);
     expect(d.agents.map((a) => a.id)).toEqual(["other"]);
     expect(d.workspaces.map((w) => w.id)).toEqual(["side"]);
@@ -247,11 +247,11 @@ describe("restricted users", () => {
     expect(a.sessions.map((s) => s.name).sort()).toEqual([mine.session, theirs.session].sort());
     expect(a.agents.map((x) => x.id)).toEqual(["fake", "other"]);
 
-    const own = await t.get(`/dashboard/api/sessions/${mine.session}`, await t.jwt({ email: DIANA }));
+    const own = await t.get(`/dashboard/api/sessions/${mine.session}`, await t.jwt({ email: ALICE }));
     expect(own.status).toBe(200);
-    const other = await t.get(`/dashboard/api/sessions/${theirs.session}`, await t.jwt({ email: DIANA }));
+    const other = await t.get(`/dashboard/api/sessions/${theirs.session}`, await t.jwt({ email: ALICE }));
     expect(other.status).toBe(404);
-    const missing = await t.get("/dashboard/api/sessions/nope", await t.jwt({ email: DIANA }));
+    const missing = await t.get("/dashboard/api/sessions/nope", await t.jwt({ email: ALICE }));
     expect(await other.json()).toMatchObject({ error: "not_found" });
     expect(missing.status).toBe(404);
   });

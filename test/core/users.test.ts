@@ -10,7 +10,7 @@ import { openDb } from "../../src/db.js";
 import { FakeDriver } from "../../src/drivers/fake.js";
 import { createMcpServer } from "../../src/mcp/server.js";
 
-const DIANA = { email: "Diana@Example.com" };
+const ALICE = { email: "Alice@Example.com" };
 const BOB = { email: "bob@example.com" };
 const ADMIN = { email: "admin@example.com" };
 
@@ -20,7 +20,7 @@ function setup(db = openDb(":memory:")) {
     workspaces: { main: "/tmp", side: "/var" },
     max_wait: 200,
     users: {
-      "diana@example.com": { agents: ["other"], workspaces: ["side"], notify_chat: "diana-chat" },
+      "alice@example.com": { agents: ["other"], workspaces: ["side"], notify_chat: "alice-chat" },
       "bob@example.com": {},
     },
   });
@@ -53,8 +53,8 @@ async function code(p: Promise<unknown>) {
 describe("per-user scoping", () => {
   it("filters agents and workspaces for restricted users only", () => {
     const { manager } = setup();
-    expect(manager.agents(DIANA)).toEqual([{ id: "other", driver: "fake", default: true }]);
-    expect(manager.workspaces(DIANA)).toEqual([{ id: "side", path: "/var", default: true }]);
+    expect(manager.agents(ALICE)).toEqual([{ id: "other", driver: "fake", default: true }]);
+    expect(manager.workspaces(ALICE)).toEqual([{ id: "side", path: "/var", default: true }]);
     expect(manager.agents(BOB)).toHaveLength(2);
     expect(manager.agents(ADMIN)).toHaveLength(2);
     expect(manager.agents()).toHaveLength(2);
@@ -63,22 +63,22 @@ describe("per-user scoping", () => {
 
   it("starts with the user's own defaults and rejects what they may not use", async () => {
     const { manager } = setup();
-    const view = await manager.start({ prompt: "hi" }, DIANA);
+    const view = await manager.start({ prompt: "hi" }, ALICE);
     expect(view).toMatchObject({ agent: "other", workspace: "side" });
-    expect(await code(manager.start({ prompt: "hi", agent: "fake" }, DIANA))).toBe("not_found");
-    expect(await code(manager.start({ prompt: "hi", workspace: "main" }, DIANA))).toBe("not_found");
-    const err = await manager.start({ prompt: "hi", agent: "fake" }, DIANA).catch((e: Error) => e);
+    expect(await code(manager.start({ prompt: "hi", agent: "fake" }, ALICE))).toBe("not_found");
+    expect(await code(manager.start({ prompt: "hi", workspace: "main" }, ALICE))).toBe("not_found");
+    const err = await manager.start({ prompt: "hi", agent: "fake" }, ALICE).catch((e: Error) => e);
     expect((err as Error).message).toContain("Available: other.");
   });
 
   it("hides other people's sessions as if they did not exist", async () => {
     const { manager } = setup();
-    const mine = await manager.start({ prompt: "mine" }, DIANA);
+    const mine = await manager.start({ prompt: "mine" }, ALICE);
     const bobs = await manager.start({ prompt: "bobs" }, BOB);
     const admins = await manager.start({ prompt: "admins" }, ADMIN);
     const rootless = await manager.start({ prompt: "stdio" });
 
-    expect(manager.list({}, DIANA).map((s) => s.session)).toEqual([mine.session]);
+    expect(manager.list({}, ALICE).map((s) => s.session)).toEqual([mine.session]);
     expect(manager.list({}, BOB).map((s) => s.session)).toEqual([bobs.session]);
     expect(
       manager
@@ -89,23 +89,23 @@ describe("per-user scoping", () => {
     expect(manager.list()).toHaveLength(4);
 
     for (const call of [
-      () => manager.send(bobs.session, "x", DIANA),
-      () => manager.respond(bobs.session, "r", "yes", DIANA),
-      () => manager.wait(bobs.session, { maxWaitMs: 0 }, DIANA),
-      () => manager.stop(bobs.session, "close", DIANA),
-      () => manager.send(admins.session, "x", DIANA),
-      () => manager.stop("nonexistent", "close", DIANA),
+      () => manager.send(bobs.session, "x", ALICE),
+      () => manager.respond(bobs.session, "r", "yes", ALICE),
+      () => manager.wait(bobs.session, { maxWaitMs: 0 }, ALICE),
+      () => manager.stop(bobs.session, "close", ALICE),
+      () => manager.send(admins.session, "x", ALICE),
+      () => manager.stop("nonexistent", "close", ALICE),
     ]) {
       expect(await code(call())).toBe("not_found");
     }
-    const err = await manager.stop(bobs.session, "close", DIANA).catch((e: Error) => e);
+    const err = await manager.stop(bobs.session, "close", ALICE).catch((e: Error) => e);
     expect((err as Error).message).toContain(`Sessions: ${mine.session}.`);
     expect((err as Error).message.split("Sessions:")[1]).not.toContain(bobs.session);
   });
 
   it("lets unrestricted callers act on restricted users' sessions", async () => {
     const { manager } = setup();
-    const mine = await manager.start({ prompt: "mine" }, DIANA);
+    const mine = await manager.start({ prompt: "mine" }, ALICE);
     await manager.wait(mine.session, { maxWaitMs: 500 }, ADMIN);
     expect((await manager.stop(mine.session, "close", ADMIN)).state).toBe("closed");
     expect((await manager.wait(mine.session, { maxWaitMs: 0 })).state).toBe("closed");
@@ -113,20 +113,20 @@ describe("per-user scoping", () => {
 
   it("persists the owner", async () => {
     const { manager, db } = setup();
-    const a = await manager.start({ prompt: "a" }, DIANA);
+    const a = await manager.start({ prompt: "a" }, ALICE);
     const b = await manager.start({ prompt: "b" });
     const owner = (name: string) => db.prepare("SELECT owner FROM sessions WHERE name = ?").get(name)?.owner;
-    expect(owner(a.session)).toBe("diana@example.com");
+    expect(owner(a.session)).toBe("alice@example.com");
     expect(owner(b.session)).toBeNull();
   });
 
   it("keeps ownership across a restart", async () => {
     const db = openDb(":memory:");
     const first = setup(db);
-    const mine = await first.manager.start({ prompt: "mine" }, DIANA);
+    const mine = await first.manager.start({ prompt: "mine" }, ALICE);
     await first.manager.shutdown();
     const second = setup(db);
-    expect(second.manager.list({}, DIANA).map((s) => s.session)).toEqual([mine.session]);
+    expect(second.manager.list({}, ALICE).map((s) => s.session)).toEqual([mine.session]);
     expect(second.manager.list({}, BOB)).toEqual([]);
   });
 });
@@ -148,10 +148,10 @@ describe("owner column migration", () => {
     `);
     const { manager } = setup(db);
     expect(manager.list().map((s) => s.session)).toEqual(["old"]);
-    expect(manager.list({}, DIANA)).toEqual([]);
+    expect(manager.list({}, ALICE)).toEqual([]);
     expect(manager.list({}, ADMIN)).toHaveLength(1);
-    const fresh = await manager.start({ prompt: "new" }, DIANA);
-    expect(manager.list({}, DIANA).map((s) => s.session)).toEqual([fresh.session]);
+    const fresh = await manager.start({ prompt: "new" }, ALICE);
+    expect(manager.list({}, ALICE).map((s) => s.session)).toEqual([fresh.session]);
   });
 
   it("is idempotent", () => {
@@ -170,13 +170,13 @@ describe("owner column migration", () => {
 describe("notification routing", () => {
   it("sends the owner's chat with notifications for their sessions only", async () => {
     const { manager, notes } = setup();
-    const mine = await manager.start({ prompt: "mine" }, DIANA);
+    const mine = await manager.start({ prompt: "mine" }, ALICE);
     const bobs = await manager.start({ prompt: "bobs" }, BOB);
     const rootless = await manager.start({ prompt: "x" });
     await new Promise((r) => setTimeout(r, 400));
     const chatOf = (s: string) => notes.filter((n) => n.session === s).map((n) => n.chat);
     expect(chatOf(mine.session).length).toBeGreaterThan(0);
-    expect(chatOf(mine.session).every((c) => c === "diana-chat")).toBe(true);
+    expect(chatOf(mine.session).every((c) => c === "alice-chat")).toBe(true);
     expect(notes.filter((n) => n.session === bobs.session).every((n) => !("chat" in n))).toBe(true);
     expect(notes.filter((n) => n.session === rootless.session).every((n) => !("chat" in n))).toBe(true);
   });
@@ -194,8 +194,8 @@ describe("notification routing", () => {
       },
     );
     await notifier.notify({ session: "otter", kind: "done", text: "x" });
-    await notifier.notify({ session: "otter", kind: "done", text: "x", chat: "diana-chat" });
-    expect(bodies.map((b) => b.chat_id)).toEqual(["household", "diana-chat"]);
+    await notifier.notify({ session: "otter", kind: "done", text: "x", chat: "alice-chat" });
+    expect(bodies.map((b) => b.chat_id)).toEqual(["household", "alice-chat"]);
   });
 });
 
@@ -223,29 +223,29 @@ describe("tools with a caller identity", () => {
 
   it("scopes a restricted user while an unlisted admin sees everything", async () => {
     const { manager } = setup();
-    const diana = await connect("diana@example.com", manager);
+    const alice = await connect("alice@example.com", manager);
     const admin = await connect("admin@example.com", manager);
     const stdio = await connect(undefined, manager);
 
-    const agents = (await call(diana, "agents")).structuredContent as { agents: { id: string }[] };
+    const agents = (await call(alice, "agents")).structuredContent as { agents: { id: string }[] };
     expect(agents.agents.map((a) => a.id)).toEqual(["other"]);
     expect(((await call(admin, "agents")).structuredContent.agents as unknown[]).length).toBe(2);
     expect(((await call(stdio, "agents")).structuredContent.agents as unknown[]).length).toBe(2);
 
-    const hers = (await call(diana, "start", { prompt: "hers" })).structuredContent.session as string;
+    const hers = (await call(alice, "start", { prompt: "hers" })).structuredContent.session as string;
     const adminOwn = (await call(admin, "start", { prompt: "admins" })).structuredContent.session as string;
 
-    const dianaList = (await call(diana, "sessions")).structuredContent.sessions as { session: string }[];
-    expect(dianaList.map((s) => s.session)).toEqual([hers]);
+    const aliceList = (await call(alice, "sessions")).structuredContent.sessions as { session: string }[];
+    expect(aliceList.map((s) => s.session)).toEqual([hers]);
     const adminList = (await call(admin, "sessions")).structuredContent.sessions as { session: string }[];
     expect(adminList.map((s) => s.session).sort()).toEqual([hers, adminOwn].sort());
 
-    const peek = await call(diana, "wait", { session: adminOwn, seconds: 0 });
+    const peek = await call(alice, "wait", { session: adminOwn, seconds: 0 });
     expect(peek.isError).toBe(true);
     expect(peek.structuredContent.error).toBe("not_found");
-    expect((await call(diana, "send", { session: adminOwn, message: "x" })).isError).toBe(true);
-    expect((await call(diana, "stop", { session: adminOwn, mode: "close" })).isError).toBe(true);
-    expect((await call(diana, "start", { prompt: "x", agent: "fake" })).structuredContent.error).toBe(
+    expect((await call(alice, "send", { session: adminOwn, message: "x" })).isError).toBe(true);
+    expect((await call(alice, "stop", { session: adminOwn, mode: "close" })).isError).toBe(true);
+    expect((await call(alice, "start", { prompt: "x", agent: "fake" })).structuredContent.error).toBe(
       "not_found",
     );
     expect((await call(admin, "wait", { session: hers, seconds: 0 })).isError).toBeUndefined();

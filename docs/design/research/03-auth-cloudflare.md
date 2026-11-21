@@ -39,11 +39,11 @@ Docs: https://developers.cloudflare.com/cloudflare-one/access-controls/applicati
 ### (c) workers-oauth-provider
 https://github.com/cloudflare/workers-oauth-provider : Workers library implementing OAuth 2.1 AS with DCR, PKCE, RFC 8414/9728 metadata, token storage in KV, delegating login to an upstream. Good if switchboard ran on Workers; ours is a Pi service behind a tunnel, so it would need a Worker front plus proxying to the Pi: extra hop, KV state, a second deploy surface. Not recommended; borrow its endpoint shape.
 
-### (d) Own AS on the Pi; /authorize behind path-scoped Access app
-- Precedence [D]: https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/ : for apps sharing a root path, more specific path rule wins and nothing is inherited; no inheritance from parent. Hostname: most specific hostname wins (`test.example.com` over `*.example.com`) per https://blog.cloudflare.com/access-wildcard-and-multi-hostname . Docs say nothing explicit about a Bypass app overriding an Allow app or about wildcard-host vs exact-host+path combos [?]. Expect: an app with exact host `build.rutang.cloud` (and path destinations) outranks `*.rutang.cloud`. VERIFY after apply with `curl -i` from non-WARP host on /mcp, /.well-known/*, /token, /register, /authorize.
-- Safest layout: exact-host apps on `build.rutang.cloud`, never trying to carve exceptions out of the wildcard app:
-  1. host app `build.rutang.cloud` with a Bypass policy (everyone) = all paths public; switchboard enforces its own bearer tokens on /mcp.
-  2. path app `build.rutang.cloud/authorize` (and `/login/*`) with Allow policy: email allowlist only (no WARP posture, since the human is in an arbitrary browser, possibly phone). Cloudflare pattern: more specific path wins over the host app.
+### (d) Own AS on the server; /authorize behind path-scoped Access app
+- Precedence [D]: https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/ : for apps sharing a root path, more specific path rule wins and nothing is inherited; no inheritance from parent. Hostname: most specific hostname wins (`test.example.com` over `*.example.com`) per https://blog.cloudflare.com/access-wildcard-and-multi-hostname . Docs say nothing explicit about a Bypass app overriding an Allow app or about wildcard-host vs exact-host+path combos [?]. Expect: an app with exact host `switchboard.example.com` (and path destinations) outranks `*.example.com`. VERIFY after apply with `curl -i` from non-WARP host on /mcp, /.well-known/*, /token, /register, /authorize.
+- Safest layout: exact-host apps on `switchboard.example.com`, never trying to carve exceptions out of the wildcard app:
+  1. host app `switchboard.example.com` with a Bypass policy (everyone) = all paths public; switchboard enforces its own bearer tokens on /mcp.
+  2. path app `switchboard.example.com/authorize` (and `/login/*`) with Allow policy: email allowlist only (no WARP posture, since the human is in an arbitrary browser, possibly phone). Cloudflare pattern: more specific path wins over the host app.
   Alternative narrower: host app Allow-all-paths-blocked default, and a bypass app per public path set (/mcp, /token, /register, /.well-known/*). More resources, deny-by-default.
 - Switchboard must validate `Cf-Access-Jwt-Assertion` on /authorize (JWKS `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, check `aud` = app AUD tag, `iss`, `email`), not trust the plain header. Bypass paths carry no JWT, so also bind consent to the authenticated email.
 - Also serve discovery on host: `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server`; Access wildcard 302-to-login on these would break claude.ai discovery (symptom: "Couldn't reach").
@@ -55,22 +55,22 @@ https://github.com/cloudflare/workers-oauth-provider : Workers library implement
 Architecture: switchboard is its own OAuth 2.1 AS + resource server (CIMD and DCR both advertised), with human login delegated to Cloudflare Access on `/authorize` only. Start with (d) JWT-in-header. If you later want no Access-JWT coupling (e.g. different host for AS), swap to (b) without changing claude.ai-facing surface.
 
 Flow:
-1. User adds connector `https://build.rutang.cloud/mcp` in claude.ai (blank Advanced settings).
-2. claude.ai backend (160.79.104.0/21) POST /mcp unauthenticated. Switchboard returns 401 + `WWW-Authenticate: Bearer resource_metadata="https://build.rutang.cloud/.well-known/oauth-protected-resource/mcp"` (host app = Bypass, so Access does not interfere).
-3. Claude GETs PRM: `{resource:"https://build.rutang.cloud/mcp", authorization_servers:["https://build.rutang.cloud"], scopes_supported:[...,"offline_access"]}`.
+1. User adds connector `https://switchboard.example.com/mcp` in claude.ai (blank Advanced settings).
+2. claude.ai backend (160.79.104.0/21) POST /mcp unauthenticated. Switchboard returns 401 + `WWW-Authenticate: Bearer resource_metadata="https://switchboard.example.com/.well-known/oauth-protected-resource/mcp"` (host app = Bypass, so Access does not interfere).
+3. Claude GETs PRM: `{resource:"https://switchboard.example.com/mcp", authorization_servers:["https://switchboard.example.com"], scopes_supported:[...,"offline_access"]}`.
 4. Claude GETs `/.well-known/oauth-authorization-server`: issuer, authorization_endpoint, token_endpoint, registration_endpoint, `code_challenge_methods_supported:["S256"]`, `client_id_metadata_document_supported:true`, `token_endpoint_auth_methods_supported:["none"]`, grant types authorization_code + refresh_token.
 5. Claude identifies (CIMD fetch of Anthropic-hosted doc, or POST /register). Redirect URIs allowed: `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback`, loopback port-agnostic.
-6. Claude opens user's browser to `/authorize?response_type=code&client_id=...&redirect_uri=...&code_challenge=...&S256&resource=https://build.rutang.cloud/mcp&state=...`.
+6. Claude opens user's browser to `/authorize?response_type=code&client_id=...&redirect_uri=...&code_challenge=...&S256&resource=https://switchboard.example.com/mcp&state=...`.
 7. Cloudflare Access (path app) intercepts: login (email allowlist, OTP/IdP), sets `CF_Authorization`, forwards to origin with `Cf-Access-Jwt-Assertion`.
 8. Switchboard verifies JWT, checks email in its own allowlist, shows consent (display redirect host), issues one-time code bound to client, PKCE challenge, resource, email; 302 to claude.ai callback.
 9. Claude POST /token (form-encoded, <10 s): returns short-lived access token (aud=resource, ~1 h) + rotating refresh token. /mcp now requires `Authorization: Bearer`; refresh returns `invalid_grant` on revoke.
 
 Terraform (cloudflare provider v5):
 - `cloudflare_zero_trust_access_policy` x2 (account-level, reusable): `bypass_everyone` (decision "bypass", include everyone); `allow_owner_email` (decision "allow", include email list; no device_posture).
-- `cloudflare_zero_trust_access_application` "switchboard_public": type "self_hosted", `destinations=[{type="public", uri="build.rutang.cloud"}]`, policies referencing bypass_everyone.
-- `cloudflare_zero_trust_access_application` "switchboard_authorize": type "self_hosted", `destinations=[{type="public", uri="build.rutang.cloud/authorize"}, {... uri="build.rutang.cloud/login/*"}]`, policies referencing allow_owner_email, `session_duration` ~24h, `app_launcher_visible=false`. Capture its `aud` for the server.
+- `cloudflare_zero_trust_access_application` "switchboard_public": type "self_hosted", `destinations=[{type="public", uri="switchboard.example.com"}]`, policies referencing bypass_everyone.
+- `cloudflare_zero_trust_access_application` "switchboard_authorize": type "self_hosted", `destinations=[{type="public", uri="switchboard.example.com/authorize"}, {... uri="switchboard.example.com/login/*"}]`, policies referencing allow_owner_email, `session_duration` ~24h, `app_launcher_visible=false`. Capture its `aud` for the server.
 - Existing wildcard app untouched. Existing tunnel ingress already routes the hostname (`cloudflare_zero_trust_tunnel_cloudflared_config` + `cloudflare_dns_record` CNAME if build.* not yet present). DNS must be proxied A/AAAA-resolving (orange cloud) so claude.ai gets public IPv4.
-- `cloudflare_ruleset` (phase `http_request_firewall_custom`, action "skip") for `ip.src in {160.79.104.0/21} and http.host eq "build.rutang.cloud"`; optional skip for /mcp,/token,/register,/.well-known/*.
+- `cloudflare_ruleset` (phase `http_request_firewall_custom`, action "skip") for `ip.src in {160.79.104.0/21} and http.host eq "switchboard.example.com"`; optional skip for /mcp,/token,/register,/.well-known/*.
 - Option (b) additionally: `cloudflare_zero_trust_access_application` type "saas" with `saas_app = {auth_type="oidc", redirect_uris=[...], grant_types=["authorization_code"], scopes=["openid","email"], ...}` + allow policy.
 
-Open verification items: precedence of exact-host app over `*.rutang.cloud` (test), whether WARP posture can be dropped on the allow policy (yes by policy design), voice mode behavior, claude.com callback.
+Open verification items: precedence of exact-host app over `*.example.com` (test), whether WARP posture can be dropped on the allow policy (yes by policy design), voice mode behavior, claude.com callback.

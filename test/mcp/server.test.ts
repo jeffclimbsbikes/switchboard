@@ -12,7 +12,7 @@ function stubManager(): SessionManagerApi & { calls: unknown[][]; next: Partial<
   const view: SessionView = {
     session: "otter",
     agent: "claude",
-    workspace: "pidev",
+    workspace: "app",
     title: "packing list",
     state: "working",
     createdAt: now,
@@ -23,7 +23,7 @@ function stubManager(): SessionManagerApi & { calls: unknown[][]; next: Partial<
     calls,
     next: {} as Partial<WaitResult>,
     agents: () => [{ id: "claude", driver: "claude" as const, default: true }],
-    workspaces: () => [{ id: "pidev", path: "/srv/pidev", default: true }],
+    workspaces: () => [{ id: "app", path: "/srv/app", default: true }],
     start: async (input: StartInput) => {
       calls.push(["start", input]);
       return view;
@@ -105,7 +105,7 @@ describe("mcp server", () => {
         kind: "question",
         questions: [
           {
-            question: "Just you, or Diana too?",
+            question: "Just you, or Alice too?",
             options: [{ label: "just me" }, { label: "both" }],
             multiSelect: false,
           },
@@ -115,17 +115,17 @@ describe("mcp server", () => {
     const client = await connect(m);
     const r = await call(client, "wait", { session: "otter", cursor: 3, seconds: 8 });
     expect(m.calls.at(-1)).toEqual(["wait", "otter", { cursor: 3, maxWaitMs: 8_000 }]);
-    expect(r.content[0]?.text).toContain("Just you, or Diana too?\n1. just me\n2. both");
+    expect(r.content[0]?.text).toContain("Just you, or Alice too?\n1. just me\n2. both");
     expect(String(r.structuredContent.next)).toMatch(/respond/);
   });
 
   it("reports a finished turn with the reply", async () => {
     const m = stubManager();
-    m.next = { state: "idle", reply: "Live at packing.rutang.cloud" };
+    m.next = { state: "idle", reply: "Live at packing.example.com" };
     const client = await connect(m);
     const r = await call(client, "respond", { session: "otter", request: "q1", answer: "both" });
     expect(m.calls[0]).toEqual(["respond", "otter", "q1", "both"]);
-    expect(r.content[0]?.text).toContain("finished:\nLive at packing.rutang.cloud");
+    expect(r.content[0]?.text).toContain("finished:\nLive at packing.example.com");
   });
 
   it("caps wait seconds at max_wait", async () => {
@@ -156,7 +156,7 @@ describe("mcp server", () => {
         { id: "opencode", driver: "acp" as const, default: false },
       ],
       workspaces: () => [
-        { id: "pidev", path: "/srv/pidev", description: "The Raspberry Pi repo", default: true },
+        { id: "app", path: "/srv/app", description: "The main repo", default: true },
         { id: "scratch", path: "/tmp/scratch", default: false },
       ],
     };
@@ -165,11 +165,11 @@ describe("mcp server", () => {
     const text = r.content[0]?.text ?? "";
     expect(text).toContain("claude (default) — Best for hard problems · model opus");
     expect(text).toContain("\nopencode\n");
-    expect(text).toContain("pidev (default) — The Raspberry Pi repo · /srv/pidev");
+    expect(text).toContain("app (default) — The main repo · /srv/app");
     expect(text).toContain("\nscratch · /tmp/scratch");
     expect(r.structuredContent).toMatchObject({
       agents: [{ id: "claude", description: "Best for hard problems" }, { id: "opencode" }],
-      workspaces: [{ id: "pidev", description: "The Raspberry Pi repo" }, { id: "scratch" }],
+      workspaces: [{ id: "app", description: "The main repo" }, { id: "scratch" }],
     });
   });
 

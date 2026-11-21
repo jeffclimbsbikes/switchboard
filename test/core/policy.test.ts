@@ -10,7 +10,7 @@ const base = {
 const config = parseConfig({
   ...base,
   users: {
-    "Diana@Example.com": { agents: ["c", "a"], workspaces: ["w2"] },
+    "Alice@Example.com": { agents: ["c", "a"], workspaces: ["w2"] },
     "bob@example.com": { agents: ["a", "b"] },
   },
 });
@@ -33,10 +33,10 @@ describe("resolveAccess", () => {
   });
 
   it("restricts listed users, compared case-insensitively", () => {
-    const access = resolveAccess(config, { email: "DIANA@example.com" });
+    const access = resolveAccess(config, { email: "ALICE@example.com" });
     expect(access).toMatchObject({
       restricted: true,
-      email: "diana@example.com",
+      email: "alice@example.com",
       agents: ["c", "a"],
       workspaces: ["w2"],
       defaultAgent: "c",
@@ -52,12 +52,12 @@ describe("resolveAccess", () => {
   });
 
   it("scopes visibility to the owner", () => {
-    const diana = resolveAccess(config, { email: "diana@example.com" });
+    const alice = resolveAccess(config, { email: "alice@example.com" });
     const admin = resolveAccess(config);
-    expect(canSee(diana, "diana@example.com")).toBe(true);
-    expect(canSee(diana, "bob@example.com")).toBe(false);
-    expect(canSee(diana, undefined)).toBe(false);
-    expect(canSee(admin, "diana@example.com")).toBe(true);
+    expect(canSee(alice, "alice@example.com")).toBe(true);
+    expect(canSee(alice, "bob@example.com")).toBe(false);
+    expect(canSee(alice, undefined)).toBe(false);
+    expect(canSee(admin, "alice@example.com")).toBe(true);
     expect(canSee(admin, undefined)).toBe(true);
   });
 
