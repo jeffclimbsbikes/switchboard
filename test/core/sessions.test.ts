@@ -45,6 +45,18 @@ async function expectError(p: Promise<unknown>, code: string) {
   return err as SwitchboardError;
 }
 
+describe("answers", () => {
+  it("records the answer to a request in the event log", async () => {
+    const { manager } = make();
+    const view = await manager.start({ prompt: "ask Which color? | red | blue" });
+    const w = await manager.wait(view.session, { maxWaitMs: 1000 });
+    await manager.respond(view.session, w.pending?.id as string, "blue");
+    await manager.wait(view.session, { maxWaitMs: 1000 });
+    const kinds = manager.detail(view.session).events.map((e) => e.event as { type: string; text?: string });
+    expect(kinds.find((e) => e.type === "answer")).toMatchObject({ type: "answer", text: "blue" });
+  });
+});
+
 describe("SessionManager lifecycle", () => {
   it("lists agents and workspaces from config", () => {
     const { manager } = make();

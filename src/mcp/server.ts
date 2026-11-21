@@ -2,7 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Caller, SessionManagerApi } from "../core/api.js";
 import { SwitchboardError } from "../core/api.js";
-import type { ModelInfo, PendingRequest, SessionState, SessionView, WaitResult } from "../types.js";
+import type {
+  HistoryEntry,
+  ModelInfo,
+  PendingRequest,
+  SessionState,
+  SessionView,
+  WaitResult,
+} from "../types.js";
 
 export const VERSION = "0.1.0";
 
@@ -15,6 +22,7 @@ How to work with it:
 - When a turn ends (state "idle"), tell the user the outcome in a sentence or two: what was done, the URL if there is one, and anything the agent flagged. Follow-ups go to the same session with send; it keeps its context.
 - If the user wants to move on, that's fine: the agent keeps working and the user gets a notification when it finishes or needs them. sessions lists everything later.
 - To choose an agent or workspace, call agents when the user names a tool or model or you are unsure which fits, and pick by description; otherwise use the defaults. Tell the user which agent you used when it isn't the default. A session keeps its agent: start a new session to switch.
+- Use history when the user refers to earlier work ("the thing we built last month"): it searches live and archived sessions, and a session name returns its full summary.
 - Use stop only when the user asks (interrupt stops the current turn; close ends the session).`;
 
 const sessionArg = z.string().describe("Session name, e.g. “otter”.");
@@ -73,6 +81,14 @@ function describeModel(m: ModelInfo): string {
           ? ` (out ${money(m.outputPrice)} per M)`
           : "";
   return `  · ${m.id}${text ? ` — ${text}` : ""}${price}${m.default ? " (default)" : ""}`;
+}
+
+function describeHistory(e: HistoryEntry): string {
+  const date = e.created.slice(0, 10);
+  const head = `${e.session} · ${date} · ${e.agent} · ${e.state === "live" ? `live (${e.sessionState})` : "archived"} — ${e.title}`;
+  return [head, e.abstract ? `  ${e.abstract}` : undefined, e.path ? `  ${e.path}` : undefined]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function result(text: string, data: Record<string, unknown>) {
@@ -292,6 +308,36 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
       return result(line, { sessions: list });
     }),
   );
+
+  if (manager.history) {
+    const find = manager.history.bind(manager);
+    server.registerTool(
+      "history",
+      {
+        title: "Search past work",
+        description:
+          "Find earlier sessions, including old ones that were summarized into the archive. Pass query (all words must match) to search, or session (a name from the results) to read that session's full summary. Newest first. Use it when the user refers to earlier work.",
+        inputSchema: {
+          query: z.string().optional().describe("Words to look for in titles, activity and summaries."),
+          session: z
+            .string()
+            .optional()
+            .describe("A session name or id from the results: returns its summary."),
+          limit: z.number().int().min(1).max(50).optional().describe("How many results (default 10)."),
+        },
+        annotations: { readOnlyHint: true },
+      },
+      wrap(async (args: { query?: string; session?: string; limit?: number }, caller) => {
+        const found = await find(args, caller);
+        const text = found.summary
+          ? found.summary
+          : found.entries.length
+            ? found.entries.map(describeHistory).join("\n\n")
+            : "Nothing found.";
+        return result(text, { entries: found.entries });
+      }),
+    );
+  }
 
   server.registerTool(
     "stop",

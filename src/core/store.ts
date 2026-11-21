@@ -2,7 +2,11 @@ import type { Db } from "../db.js";
 import type { DriverEvent } from "../drivers/driver.js";
 import type { PendingRequest, SessionState, TokenUsage, UsageTotals } from "../types.js";
 
-export type StoredEventData = DriverEvent | { type: "prompt"; text: string } | { type: "note"; text: string };
+export type StoredEventData =
+  | DriverEvent
+  | { type: "prompt"; text: string }
+  | { type: "note"; text: string }
+  | { type: "answer"; requestId: string; text: string };
 
 export interface SessionRow {
   name: string;
@@ -190,6 +194,23 @@ export class SessionStore {
     const row = this.get(name);
     if (!row) throw new Error(`no such session: ${name}`);
     return row;
+  }
+
+  /** Deletes the session with its events and usage rows. */
+  remove(name: string): void {
+    this.db.exec("BEGIN");
+    try {
+      this.db.prepare("DELETE FROM events WHERE session = ?").run(name);
+      const usage = this.db
+        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'usage_turns'")
+        .get();
+      if (usage) this.db.prepare("DELETE FROM usage_turns WHERE session = ?").run(name);
+      this.db.prepare("DELETE FROM sessions WHERE name = ?").run(name);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   /** Counts one finished turn and adds whatever cost and tokens the agent reported for it. */

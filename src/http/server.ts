@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express from "express";
 import type { JWTVerifyGetKey } from "jose";
 import type { Config } from "../config.js";
+import { AccountsService } from "../core/accounts.js";
 import type { DashboardApi } from "../core/api.js";
 import type { Db } from "../db.js";
 import { requireBearer } from "./auth/bearer.js";
@@ -21,6 +22,8 @@ export interface HttpAppOptions {
   createMcpServer: () => McpServer;
   /** Serves the read-only dashboard under /dashboard when given. */
   dashboard?: DashboardApi;
+  /** Claude login accounts behind the dashboard card; defaults to one derived from the config. */
+  accounts?: AccountsService;
   now?: () => Date;
   accessKeys?: JWTVerifyGetKey;
   fetch?: typeof fetch;
@@ -95,6 +98,7 @@ export function createHttpApp(opts: HttpAppOptions): express.Express {
         createMcpServer: opts.createMcpServer,
         identify,
         now,
+        accounts: opts.accounts ?? new AccountsService({ config }),
       }),
     );
   }

@@ -3,7 +3,8 @@ import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { type Config, defaultConfigPath, loadConfig, workspaces } from "./config.js";
+import { archiveDir, type Config, defaultConfigPath, loadConfig, workspaces } from "./config.js";
+import { ArchiveService } from "./core/archive.js";
 import { createNotifier } from "./core/notifier.js";
 import { SessionManager } from "./core/sessions.js";
 import { openDb } from "./db.js";
@@ -19,6 +20,7 @@ usage: switchboard <command> [--config <file>]
   stdio    MCP over stdin/stdout, for local clients (Claude Code, Desktop)
   check    validate the config and look for the agent executables
   grants   list connected clients; --revoke signs them all out
+  archive  summarize old sessions into the archive and remove them; --dry-run lists them
 
 config: --config, $SWITCHBOARD_CONFIG, or ~/.config/switchboard/config.toml`;
 
@@ -40,6 +42,7 @@ function boot(config: Config) {
     notifier: createNotifier(config.notify),
   });
   manager.usage.start();
+  manager.archive?.start();
   return { db, manager };
 }
 
@@ -93,6 +96,11 @@ function check(config: Config): boolean {
     };
     console.log(`workspace ${w.id}: ${w.path} ${mark[status]}`);
   }
+  if (config.archive) {
+    console.log(
+      `archive: after ${Math.round(config.archive.after / 86_400_000)}d → ${archiveDir(config)} (summarizer ${config.archive.summarizer.agent})`,
+    );
+  }
   console.log(
     `auth: ${config.auth.login} · listen ${config.listen}${config.public_url ? ` · ${config.public_url}` : ""}`,
   );
@@ -107,6 +115,7 @@ async function main() {
       help: { type: "boolean", short: "h" },
       version: { type: "boolean" },
       revoke: { type: "boolean" },
+      "dry-run": { type: "boolean" },
     },
   });
   if (values.version) return console.log(VERSION);
@@ -125,6 +134,33 @@ async function main() {
     const grants = listGrants(db);
     if (!grants.length) return console.log("no active grants");
     for (const g of grants) console.log(JSON.stringify(g));
+    return;
+  }
+
+  if (command === "archive") {
+    if (!config.archive) {
+      console.error("no [archive] section in the config");
+      process.exitCode = 1;
+      return;
+    }
+    const service = new ArchiveService({
+      config,
+      db: openDb(join(config.state_dir, "switchboard.db")),
+      drivers: createDrivers(config),
+      notifier: createNotifier(config.notify),
+    });
+    const dryRun = values["dry-run"] === true;
+    const run = await service.run({ dryRun });
+    const verb = dryRun ? "would archive" : "archived";
+    console.log(`${verb} ${run.sessions.length} session(s)${run.sessions.length ? ":" : ""}`);
+    for (const s of run.sessions) {
+      console.log(
+        `  ${s.name}  ${s.agent}  ${s.updatedAt.slice(0, 10)}  ${s.title}${s.file ? `  → ${s.file}` : ""}`,
+      );
+    }
+    for (const f of run.failed) console.error(`  failed ${f.name}: ${f.error}`);
+    process.exitCode = run.failed.length ? 1 : 0;
+    setTimeout(() => process.exit(), 2_000).unref();
     return;
   }
 

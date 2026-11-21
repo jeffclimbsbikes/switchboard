@@ -6,15 +6,15 @@ import { z } from "zod";
 import type { ModelInfo } from "./types.js";
 
 const duration = z
-  .union([z.number().int().nonnegative(), z.string().regex(/^\d+(ms|s|m|h)$/)])
+  .union([z.number().int().nonnegative(), z.string().regex(/^\d+(ms|s|m|h|d)$/)])
   .transform((v) => (typeof v === "number" ? v : parseDuration(v)));
 
 export function parseDuration(text: string): number {
-  const m = /^(\d+)(ms|s|m|h)$/.exec(text);
+  const m = /^(\d+)(ms|s|m|h|d)$/.exec(text);
   if (!m) throw new Error(`bad duration: ${text}`);
   const n = Number(m[1]);
-  const unit = m[2] as "ms" | "s" | "m" | "h";
-  return n * { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[unit];
+  const unit = m[2] as "ms" | "s" | "m" | "h" | "d";
+  return n * { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[unit];
 }
 
 const path = z.string().transform(expandHome);
@@ -114,6 +114,15 @@ const usage = z
   })
   .default({});
 
+const archive = z.object({
+  after: duration.default(35 * 86_400_000),
+  dir: path.optional(),
+  summarizer: z.object({ agent: z.string().min(1), model: z.string().min(1).optional() }),
+  max_per_run: z.number().int().positive().default(20),
+  delete_agent_transcripts: z.boolean().default(false),
+  agent_hint: z.boolean().default(true),
+});
+
 const user = z.object({
   agents: z.array(z.string()).optional(),
   workspaces: z.array(z.string()).optional(),
@@ -142,9 +151,30 @@ export const configSchema = z
     auth: auth.default({ login: "none" }),
     notify,
     usage,
+    archive: archive.optional(),
     users,
   })
   .superRefine((config, ctx) => {
+    const summarizer = config.archive?.summarizer;
+    if (summarizer) {
+      const agent = config.agents[summarizer.agent];
+      if (!agent) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["archive", "summarizer", "agent"],
+          message: `unknown agent "${summarizer.agent}"; configured: ${Object.keys(config.agents).join(", ")}`,
+        });
+      } else if (summarizer.model) {
+        const catalog = agentModels(agent);
+        if (catalog.length > 0 && !catalog.some((m) => m.id === summarizer.model)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["archive", "summarizer", "model"],
+            message: `agent "${summarizer.agent}" has no model "${summarizer.model}"; catalog: ${catalog.map((m) => m.id).join(", ")}`,
+          });
+        }
+      }
+    }
     const workspaceIds = Object.keys(config.workspaces);
     for (const [email, u] of Object.entries(config.users)) {
       for (const id of u.agents ?? []) {
@@ -174,6 +204,7 @@ export type AgentConfig = z.output<typeof agent>;
 export type AuthConfig = z.output<typeof auth>;
 export type NotifyConfig = z.output<typeof notify>;
 export type UsageConfig = z.output<typeof usage>;
+export type ArchiveConfig = z.output<typeof archive>;
 
 export function expandHome(p: string): string {
   if (p === "~") return homedir();
@@ -192,6 +223,10 @@ export function parseConfig(raw: unknown): Config {
 
 export function loadConfig(file: string): Config {
   return parseConfig(parseToml(readFileSync(resolve(file), "utf8")));
+}
+
+export function archiveDir(config: Config): string {
+  return config.archive?.dir ?? join(config.state_dir, "archive");
 }
 
 export function defaultConfigPath(): string {

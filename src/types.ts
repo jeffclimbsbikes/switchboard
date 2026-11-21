@@ -185,6 +185,7 @@ export interface DashboardSnapshot {
   workspaces: WorkspaceInfo[];
   sessions: DashboardSession[];
   counts: { total: number; live: number; maxLive: number; byState: Record<SessionState, number> };
+  archive?: DashboardArchive;
 }
 
 export interface DashboardEvent {
@@ -199,4 +200,37 @@ export interface DashboardSessionDetail {
   lastSeq: number;
   hasMore: boolean;
   truncated: boolean;
+}
+
+export interface HistoryQuery {
+  query?: string;
+  session?: string;
+  limit?: number;
+}
+
+export interface HistoryEntry {
+  /** Session name for live sessions; the archive file name (no extension) for archived ones. */
+  id: string;
+  session: string;
+  agent: string;
+  title: string;
+  created: string;
+  updated: string;
+  state: "live" | "archived";
+  /** Live sessions: the session's own state. */
+  sessionState?: SessionState;
+  abstract?: string;
+  /** Archived summary file; only for unrestricted callers. */
+  path?: string;
+}
+
+export interface HistoryResult {
+  entries: HistoryEntry[];
+  /** With `session`: the full archived summary, or a line about the live session. */
+  summary?: string;
+}
+
+export interface DashboardArchive {
+  count: number;
+  recent: HistoryEntry[];
 }

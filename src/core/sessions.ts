@@ -1,4 +1,10 @@
-import { agentDefaultModel, agentModels, type Config, workspaces as configWorkspaces } from "../config.js";
+import {
+  agentDefaultModel,
+  agentModels,
+  archiveDir,
+  type Config,
+  workspaces as configWorkspaces,
+} from "../config.js";
 import type { Db } from "../db.js";
 import type { AgentSession, Driver, DriverEvent } from "../drivers/driver.js";
 import type {
@@ -7,6 +13,8 @@ import type {
   DashboardSession,
   DashboardSessionDetail,
   DashboardSnapshot,
+  HistoryQuery,
+  HistoryResult,
   ModelInfo,
   SessionState,
   SessionSummary,
@@ -23,6 +31,8 @@ import {
   type StartInput,
   SwitchboardError,
 } from "./api.js";
+import { ArchiveService } from "./archive.js";
+import { HistoryService } from "./history.js";
 import { pickName } from "./names.js";
 import { type Notifier, nullNotifier } from "./notifier.js";
 import { type Access, canSee, resolveAccess } from "./policy.js";
@@ -44,11 +54,31 @@ interface Proc {
   lastText?: string;
   parkTimer?: NodeJS.Timeout;
   nagTimer?: NodeJS.Timeout;
+  launch?: LaunchInfo;
+  /** What the agent was last asked, kept while the process has shown no sign of life. */
+  turnText?: string;
+}
+
+interface LaunchOptions {
+  cwd: string;
+  model?: string | undefined;
+  resume?: string;
+  priorCostUsd?: number;
+  appendSystemPrompt?: string | undefined;
+}
+
+interface LaunchInfo {
+  driver: Driver;
+  opts: LaunchOptions;
+  startedAt: number;
+  started: boolean;
+  retried: boolean;
 }
 
 type Waiter = () => void;
 
 const NOTE_CHARS = 300;
+const LAUNCH_RETRY_WINDOW_MS = 10_000;
 const DASHBOARD_CLOSED_SHOWN = 100;
 const DASHBOARD_ACTIVITY_EVENTS = 60;
 const DASHBOARD_EVENT_CAP = 500;
@@ -66,6 +96,10 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
   private readonly now: () => Date;
   private readonly store: SessionStore;
   readonly usage: UsageService;
+  readonly archive?: ArchiveService;
+  /** Present only when `[archive]` is configured, so the `history` tool stays opt-in. */
+  readonly history?: (input: HistoryQuery, caller?: Caller) => Promise<HistoryResult>;
+  private readonly historyService: HistoryService;
   private readonly live = new Map<string, Proc>();
   private readonly waiters = new Map<string, Set<Waiter>>();
 
@@ -76,6 +110,18 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     this.now = options.now ?? (() => new Date());
     this.store = new SessionStore(options.db);
     this.usage = options.usage ?? new UsageService({ config: options.config, db: options.db, now: this.now });
+    this.historyService = new HistoryService(options.config, options.db);
+    if (options.config.archive) {
+      this.archive = new ArchiveService({
+        config: options.config,
+        db: options.db,
+        drivers: options.drivers,
+        notifier: this.notifier,
+        now: this.now,
+        isLive: (name) => !!this.live.get(name)?.session,
+      });
+      this.history = (input, caller) => this.historyService.find(input, resolveAccess(this.config, caller));
+    }
     this.recover();
   }
 
@@ -139,6 +185,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       return { ...info, ...(runAs && { runAs }), live: liveSessions.length, liveSessions };
     });
     const drivers = visibleAgents.map((a) => a.driver);
+    const archive = this.historyService.archiveSummary(access);
     return {
       viewer: { ...(access.email && { email: access.email }), restricted: access.restricted },
       agents,
@@ -157,6 +204,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
         maxLive: this.config.max_live_sessions,
         byState,
       },
+      ...(archive && { archive }),
     };
   }
 
@@ -251,12 +299,13 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       createdAt: at,
       updatedAt: at,
     });
+    const hint = this.agentHint();
     await this.launch(name, driver, {
       cwd: workspace.path,
       model,
-      appendSystemPrompt: "append_system_prompt" in agent ? agent.append_system_prompt : undefined,
+      appendSystemPrompt: this.systemPrompt(agent),
     });
-    await this.beginTurn(name, prompt);
+    await this.beginTurn(name, prompt, agent.driver !== "claude" && hint ? `${hint}\n\n${prompt}` : prompt);
     return this.view(name);
   }
 
@@ -304,9 +353,11 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     if (!proc?.session) throw new SwitchboardError(`${session} is not running; the request is gone.`, "busy");
     this.clearNag(proc);
     this.store.update(session, { state: "working", pending: null, updatedAt: this.stamp() });
+    this.append(session, { type: "answer", requestId, text: answer });
     try {
       await proc.session.respond(requestId, resolved);
     } catch (err) {
+      this.append(session, { type: "note", text: "the answer could not be delivered" });
       this.store.update(session, { state: "waiting", pending });
       throw new SwitchboardError(`Could not deliver the answer: ${messageOf(err)}`, "busy");
     }
@@ -371,6 +422,7 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
 
   async shutdown(): Promise<void> {
     this.usage.stop();
+    this.archive?.stop();
     const procs = [...this.live.values()];
     this.live.clear();
     await Promise.all(procs.map((p) => this.retire(p)));
@@ -486,22 +538,25 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       model: row.model,
       resume: row.agentSessionId,
       priorCostUsd: row.usage?.costUsd ?? 0,
-      appendSystemPrompt: "append_system_prompt" in agent ? agent.append_system_prompt : undefined,
+      appendSystemPrompt: this.systemPrompt(agent),
     });
   }
 
-  private async launch(
-    name: string,
-    driver: Driver,
-    opts: {
-      cwd: string;
-      model?: string | undefined;
-      resume?: string;
-      priorCostUsd?: number;
-      appendSystemPrompt?: string | undefined;
-    },
-  ): Promise<void> {
-    const proc: Proc = { dead: false };
+  private agentHint(): string | undefined {
+    if (!this.config.archive?.agent_hint) return undefined;
+    return `Past sessions are summarized in ${archiveDir(this.config)} (markdown files plus index.jsonl, newest last). Grep them when earlier work matters.`;
+  }
+
+  private systemPrompt(agent: Config["agents"][string]): string | undefined {
+    if (agent.driver !== "claude") return undefined;
+    return [agent.append_system_prompt, this.agentHint()].filter(Boolean).join("\n\n") || undefined;
+  }
+
+  private async launch(name: string, driver: Driver, opts: LaunchOptions, retried = false): Promise<Proc> {
+    const proc: Proc = {
+      dead: false,
+      launch: { driver, opts, startedAt: this.now().getTime(), started: false, retried },
+    };
     this.live.set(name, proc);
     try {
       proc.session = await driver.start({
@@ -518,18 +573,55 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       this.store.update(name, { state: row?.agentSessionId ? "parked" : "failed", updatedAt: this.stamp() });
       throw new SwitchboardError(`Could not start the agent: ${messageOf(err)}`, "bad_input");
     }
+    return proc;
   }
 
-  private async beginTurn(name: string, text: string): Promise<void> {
+  private shouldRetryLaunch(proc: Proc): boolean {
+    const info = proc.launch;
+    return (
+      !!info &&
+      !info.started &&
+      !info.retried &&
+      proc.turnText !== undefined &&
+      this.now().getTime() - info.startedAt <= LAUNCH_RETRY_WINDOW_MS
+    );
+  }
+
+  private retryLaunch(name: string, old: Proc): void {
+    const { driver, opts } = old.launch as LaunchInfo;
+    const text = old.turnText as string;
+    old.dead = true;
+    this.live.delete(name);
+    void this.retire(old);
+    this.append(name, { type: "note", text: "agent exited at launch; retried" });
+    this.launch(name, driver, opts, true)
+      .then((proc) => {
+        proc.turnText = text;
+        return proc.session?.prompt(text);
+      })
+      .catch((err) => {
+        const message = messageOf(err);
+        const state = this.store.get(name)?.state;
+        if (state === "working" || state === "starting") {
+          this.store.update(name, { state: "failed", pending: null, updatedAt: this.stamp() });
+        }
+        this.append(name, { type: "error", message, fatal: true });
+        this.notify(name, "failed", message);
+      });
+  }
+
+  private async beginTurn(name: string, text: string, agentText = text): Promise<void> {
     const proc = this.live.get(name);
     if (!proc?.session) throw new SwitchboardError(`${name} is not running.`, "busy");
     clearTimeout(proc.parkTimer);
     proc.lastText = undefined;
+    proc.turnText = agentText;
     this.append(name, { type: "prompt", text });
     this.store.update(name, { state: "working", pending: null, updatedAt: this.stamp() });
     try {
-      await proc.session.prompt(text);
+      await proc.session.prompt(agentText);
     } catch (err) {
+      if (proc.launch) proc.launch.started = true;
       this.onEvent(name, proc, { type: "error", message: messageOf(err), fatal: true });
       throw new SwitchboardError(`The agent did not accept the prompt: ${messageOf(err)}`, "busy");
     }
@@ -552,6 +644,11 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
       this.usage.noteRateLimit(event, at);
       return;
     }
+    if (event.type === "error" && event.fatal && this.shouldRetryLaunch(proc)) {
+      this.retryLaunch(name, proc);
+      return;
+    }
+    if (proc.launch && event.type !== "error") proc.launch.started = true;
     const waiting = (this.waiters.get(name)?.size ?? 0) > 0;
     const line = condenseActivity([event])[0];
     const patch = { updatedAt: at, ...(line && { lastActivity: line }) };

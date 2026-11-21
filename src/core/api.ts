@@ -2,6 +2,8 @@ import type {
   AgentInfo,
   DashboardSessionDetail,
   DashboardSnapshot,
+  HistoryQuery,
+  HistoryResult,
   SessionState,
   SessionSummary,
   SessionView,
@@ -41,6 +43,8 @@ export interface SessionManagerApi {
   list(filter?: { state?: SessionState }, caller?: Caller): SessionSummary[];
   /** One line about plan usage for the agents the caller can use, when known. */
   usageHint?(caller?: Caller): string | undefined;
+  /** Search live and archived sessions, or read one session's summary. Optional: stubs may omit it. */
+  history?(input: HistoryQuery, caller?: Caller): Promise<HistoryResult>;
   stop(session: string, mode: "interrupt" | "close", caller?: Caller): Promise<SessionView>;
   shutdown(): Promise<void>;
 }
@@ -50,6 +54,7 @@ export interface DashboardApi {
   snapshot(caller?: Caller): DashboardSnapshot;
   /** Starts a background refresh of stale plan usage; returns immediately. */
   touchUsage?(): void;
+  history?(input: HistoryQuery, caller?: Caller): Promise<HistoryResult>;
   /** Without `since`: the newest `limit` events. With it: events after that seq, oldest first. */
   detail(session: string, opts?: { since?: number; limit?: number }, caller?: Caller): DashboardSessionDetail;
 }

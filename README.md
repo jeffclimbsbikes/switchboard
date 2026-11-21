@@ -52,6 +52,7 @@ A `fake` driver exists for tests. Agents can optionally run as another Unix user
 | `respond` | answer a question or approval in the user's words ("blue", "2", "allow") |
 | `sessions` | everything, one line each, optionally filtered by state |
 | `stop` | `interrupt` the current turn or `close` the session |
+| `history` | search live and archived sessions, or read an archived summary (only with `[archive]`) |
 
 The server's MCP instructions tell the client it is pairing with a live agent, not filling in a form: delegate whole tasks, give short natural updates while waiting (8 to 10 s waits in voice), answer the agent's questions itself only when you already told it the answer, otherwise ask you and pass your answer to `respond`, report the outcome when a turn ends, and use `stop` only when asked. The dashboard shows the exact text.
 
@@ -77,7 +78,7 @@ Node 22.13+ is required. `switchboard check` confirms the agent executables and 
 | `listen` | `host:port`, default `127.0.0.1:8787` |
 | `public_url` | public HTTPS URL; required for OAuth (anything but `auth = none`) |
 | `state_dir` | default `~/.local/state/switchboard` |
-| `max_wait` | longest any tool call blocks, default `25s` (`ms`, `s`, `m`, `h`) |
+| `max_wait` | longest any tool call blocks, default `25s` (`ms`, `s`, `m`, `h`, `d`) |
 | `idle_park_after` | idle time before a session's process exits, default `30m` |
 | `max_live_sessions` | concurrent agent processes, default 4 |
 | `[agents.<id>]` | `driver = "claude"`, `"acp"` or `"fake"`; see below |
@@ -85,6 +86,7 @@ Node 22.13+ is required. `switchboard check` confirms the agent executables and 
 | `[auth]` | `login = "none"`, `"cloudflare-access"` (`team`, `aud`, `allow`) or `"dev"` (`email`) |
 | `[users."email"]` | per-user `agents`, `workspaces`, `notify_chat` |
 | `[usage.ollama]`, `[usage.claude]` | optional usage pollers |
+| `[archive]` | optional: summarize and remove old sessions; see Archive and history |
 | `[notify]` | `telegram = { token_env, chat }`, `ntfy = { url }`, `command`, `nag_after` |
 
 Agent keys: every agent takes `description` (max 300 characters), `models` and `default`. `claude` agents also take `executable` (defaults to the SDK's bundled or PATH `claude`), `model`, `permission_mode` (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `dontAsk`, `auto`; default `default`), `append_system_prompt` and `run_as`. `acp` agents take `command` (required), `env`, `model` and `run_as`. Without `[auth]` the login is `none`.
@@ -179,6 +181,47 @@ example `Usage: Claude plan: 5-hour 34%, 7-day 61% (resets Tue); Ollama: Pro,
 Restricted users get the hint only for the providers their own agents use, and
 the dashboard shows them only their own sessions' cost.
 
+## Archive and history
+
+Old sessions should not pile up, and their history should not be lost. With an `[archive]` section, sessions that are not live, are `idle`, `parked`, `failed` or `closed`, and were last updated more than `after` ago are summarized in detail by an agent of your choice, written to a searchable archive, and then removed from the live store.
+
+```toml
+[archive]
+after = "35d"                                   # default
+# dir = "/var/lib/switchboard/archive"          # default <state_dir>/archive
+summarizer = { agent = "claude", model = "claude-haiku-4-5" }   # required; model optional
+# max_per_run = 20                              # default
+# delete_agent_transcripts = false              # default
+# agent_hint = true                             # default
+```
+
+| Key | Meaning |
+| --- | --- |
+| `after` | age (`updated_at`) before a session is archived, default `35d` |
+| `dir` | where summaries go, default `<state_dir>/archive` |
+| `summarizer` | `{ agent, model }`; the agent must exist and the model must be in its catalog, if it has one |
+| `max_per_run` | sessions archived per run (oldest first), default 20 |
+| `delete_agent_transcripts` | also delete the agent's own transcript (Claude Code's `.jsonl`), default `false` |
+| `agent_hint` | tell new sessions where the archive is, default `true` |
+
+**Runs.** Once a day (the first about 10 minutes after the server starts), and on demand with `switchboard archive`; `switchboard archive --dry-run` only lists what would be archived. A run that archived something sends the notifier one line ("archived 3 sessions").
+
+**What is summarized.** A transcript built from switchboard's own events (prompts, assistant text, tool lines, requests and the answers given, turn results, errors, cost) plus, when readable, the agent's native transcript. For Claude Code that is `~/.claude/projects/<slug>/<agentSessionId>.jsonl`, where `~` is the home of the agent's `run_as` user (or the current user), and `<slug>` is the session's cwd with every non-alphanumeric character replaced by `-` (`/home/me/my.app` becomes `-home-me-my-app`). An unreadable transcript is skipped silently. Each part is cut to a size budget, keeping its head and tail with an elision marker. The summarizer runs through the normal driver interface as a one-shot session in a temporary directory; it must not need approvals (a request fails that session's archiving). Its cost is not recorded.
+
+**Output.** `<dir>/<YYYY>/<MM>/<YYYY-MM-DD>-<session>-<agent>.md` (the date is when the session was created): YAML front matter (`session`, `agent`, `workspace`, `cwd`, `owner`, `model`, `title`, `state`, `created`, `updated`, `archived`, `turns`, `cost_usd`, `agent_session_id`), the summary (Goal, What happened, Changes, Decisions and why, Outcome, Open issues / follow-ups, Notable errors) and an Outline of the user's prompts with timestamps. A line with the same metadata, the file name and a 2-3 sentence `abstract` is appended to `<dir>/index.jsonl` (newest last). Files are written atomically, mode 0644 (directories 0755), so other accounts can read them.
+
+**Safety.** The session's rows (session, events, usage) are deleted only after the summary and index line are on disk. Any failure leaves the session untouched; it is logged and retried on the next run. With `delete_agent_transcripts` the agent's transcript is removed right after the rows; a failure there is logged only.
+
+**Agent hint.** With `agent_hint`, every new Claude Code session gets "Past sessions are summarized in `<dir>` (markdown files plus index.jsonl, newest last). Grep them when earlier work matters." appended to its system prompt; for ACP agents the same line is prepended to the first prompt (the event log keeps your original text). Agents that run as another account need read access to `<dir>` and its parents.
+
+**The `history` tool** (offered when `[archive]` is configured). `history({ query?, session?, limit? })` searches live sessions (name, title, latest activity) and the archive (index abstracts, then the full text of the summaries); all words must match, case-insensitively, newest first, `limit` default 10, max 50. Each result has the session name, date, agent, title, abstract, `state` (`live` or `archived`) and, for unrestricted callers, the file path. With `session` (a name, or the id shown in results) it returns the whole archived summary, or one line about a session that is still live. Restricted users only see their own sessions and archives.
+
+**Dashboard.** An Archive tab shows the count and the newest 20 (click one to read its summary) with a search box backed by `/dashboard/api/history?q=` (or `?session=<id>`), under the same access rules.
+
+## Agents that die at launch
+
+If an agent process emits a fatal error within 10 seconds of starting, before any `session`, `text` or `tool` event (for example Claude Code exiting with code 1 while refreshing an expired login), switchboard restarts it once with the same prompt and records a note, "agent exited at launch; retried". This covers new sessions and resume-on-send. Later failures are not retried.
+
 ## Remote: claude.ai as the client
 
 Run `switchboard serve` behind HTTPS and add `https://<host>/mcp` as a custom connector in claude.ai (Settings, Connectors). The recommended setup is a Cloudflare Tunnel (your server dials out, no open ports) with two Access applications:
@@ -250,6 +293,37 @@ must be able to execute the agent binary and read the workspace. Only `PATH`,
 `CLAUDE_*`, `ANTHROPIC_*` and `SWITCHBOARD_*` variables (plus an acp agent's
 configured `env`) are passed through; the agent gets her `HOME`, her
 credentials, and her permissions, not yours.
+
+## Claude login
+
+Each Unix user has its own Claude Code login, and it expires. The dashboard has a **Claude login**
+card (hidden when no `claude` agent is configured) so you can log the right account back in from a
+phone, without SSH.
+
+- **Accounts** are derived from the config: one per Unix user a `claude` agent runs as (`self` is the
+  switchboard user, for agents without `run_as`). The card shows the agents using each account.
+- **Access**: unrestricted callers see every account. Users under `[users]` see only the accounts their
+  allowed agents run as; any other account answers 404. No extra config.
+- **Status** comes from `claude auth status --json` (run through `sudo -n -u <user>` for `run_as`
+  accounts): `logged_in`, `expiring` (sign-in ends within 3 days), `expired_refreshable`,
+  `logged_out`, `unknown`. Only the status, the sign-in end time and the plan are read; tokens are
+  never read, returned or logged.
+- **Log in** runs `claude auth login --claudeai` as that user (plain pipes, no TTY needed), returns the
+  authorize link, and you tap it to sign in with Anthropic in your own browser. Anthropic shows a code;
+  paste it in the card and switchboard writes it to the CLI. The card then re-reads the status.
+  A login that is not finished in 10 minutes is killed, and starting again replaces the old one.
+
+API (all under the dashboard's identity check):
+
+| Route | |
+|---|---|
+| `GET /dashboard/api/accounts` | `[{ account, agents, status, expiresAt?, subscriptionType? }]` for the accounts you may see |
+| `POST /dashboard/api/accounts/:account/login` | `{ loginId, url }` |
+| `POST /dashboard/api/accounts/:account/login/:loginId` with `{ code }` | `{ ok: true, account }`, or 422 `{ ok: false, error }`, 409 if the login is gone |
+
+The POSTs need `Content-Type: application/json` and an `Origin` (or `Referer`) matching `public_url`
+or the request host. The sudo rule that already lets switchboard run agents as the guest covers this.
+Details of the CLI's behaviour: [docs/notes-claude-login.md](docs/notes-claude-login.md).
 
 ## Security model
 

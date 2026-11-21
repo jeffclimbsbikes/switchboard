@@ -1,4 +1,5 @@
 import { ICON_DATA_URI } from "./icon.js";
+import { LOGIN_CSS, LOGIN_HTML, LOGIN_JS } from "./login-ui.js";
 
 const TEMPLATE = `<!doctype html>
 <html lang="en">
@@ -177,6 +178,10 @@ table.plain{width:100%;border-collapse:collapse;font-size:13px}
 table.plain th{text-align:left;font:500 10.5px var(--mono);color:var(--silk-3);text-transform:uppercase;letter-spacing:.08em;padding:0 6px 6px}
 table.plain td{padding:7px 6px;border-top:1px solid var(--line);overflow-wrap:anywhere;vertical-align:top;font-family:var(--mono)}
 table.plain td b{color:var(--silk)}
+.searchbar{display:flex;gap:8px;margin:8px 0}
+.searchbar input{flex:1;min-width:0;font:13px var(--mono);color:var(--silk);background:rgba(0,0,0,.28);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
+tr.pick{cursor:pointer}
+tr.pick:hover td{background:rgba(255,255,255,.03)}
 .empty{color:var(--silk-3);font-size:13px;padding:14px;border:1px dashed var(--line);border-radius:6px;text-align:center}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:8px}
 .gh2{display:flex;align-items:center;gap:10px;margin:22px 0 8px;font:600 12px var(--mono);text-transform:uppercase;letter-spacing:.09em}
@@ -266,6 +271,7 @@ a.ext{color:var(--copper-hi)}
 .plan li::before{content:"○ ";color:var(--silk-3)}.plan li.completed::before{content:"● ";color:var(--good)}.plan li.in_progress::before{content:"◐ ";color:var(--ind)}
 @media(max-width:480px){h1 .rev{display:block;width:fit-content;margin:8px 0 0;top:0}.hero{font-size:46px}.ic-name{font-size:23px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+__LOGIN_CSS__
 </style>
 </head>
 <body>
@@ -295,6 +301,7 @@ a.ext{color:var(--copper-hi)}
 <ul class="summary" id="kpis" aria-label="Summary"></ul>
 </header>
 <div id="banner" class="banner" hidden></div>
+__LOGIN_HTML__
 <main class="board" id="main"><div class="empty" style="grid-column:1/-1">Loading…</div></main>
 <section class="board" style="margin-top:16px">
 <div class="part wide">
@@ -329,6 +336,8 @@ a.ext{color:var(--copper-hi)}
     { id: "closed", label: "Closed", states: ["closed"] }
   ];
   var TABS = [["tools", "Tools"], ["connections", "Connections"]];
+  function tabList() { return state && state.archive ? TABS.concat([["archive", "Archive"]]) : TABS; }
+  var archUi = { q: "", results: null, viewing: null, summary: null, error: null };
 
   var state = null;
   var mcp = null;
@@ -825,9 +834,57 @@ a.ext{color:var(--copper-hi)}
     root.appendChild(kv);
   }
 
+  function runSearch() {
+    if (!archUi.q) { archUi.results = null; archUi.error = null; lastKey = ""; render(); return; }
+    getJson("/dashboard/api/history?q=" + encodeURIComponent(archUi.q)).then(function (r) {
+      archUi.results = r.entries; archUi.error = null;
+    }, function (err) { archUi.error = err.message; }).then(function () { lastKey = ""; render(); });
+  }
+
+  function viewPast(e) {
+    if (e.state === "live") { openSession(e.session); return; }
+    getJson("/dashboard/api/history?session=" + encodeURIComponent(e.id)).then(function (r) {
+      archUi.viewing = e.id; archUi.summary = r.summary; archUi.error = null;
+    }, function (err) { archUi.error = err.message; }).then(function () { lastKey = ""; render(); });
+  }
+
+  function renderArchive(root) {
+    var input = h("input", { type: "search", value: archUi.q, placeholder: "Search past sessions", "aria-label": "Search past sessions" });
+    root.appendChild(sublab("Archive", state.archive.count));
+    root.appendChild(h("form", {
+      class: "searchbar",
+      onsubmit: function (e) { e.preventDefault(); archUi.q = input.value.trim(); runSearch(); }
+    }, input, h("button", { class: "tbtn", type: "submit" }, "Search")));
+    if (archUi.error) root.appendChild(h("p", { class: "note" }, archUi.error));
+    var list = archUi.results || state.archive.recent;
+    root.appendChild(sublab(archUi.results ? "Results" : "Newest", list.length));
+    if (!list.length) {
+      root.appendChild(h("div", { class: "empty" }, archUi.results ? "Nothing matches." : "Nothing archived yet."));
+    } else {
+      var body = h("tbody");
+      list.forEach(function (e) {
+        body.appendChild(h("tr", {
+          class: "pick", tabindex: "0", role: "button",
+          onclick: function () { viewPast(e); },
+          onkeydown: function (ev) { if (ev.key === "Enter") viewPast(e); }
+        },
+          h("td", { "data-l": "date", title: fullTime(e.created) }, e.created.slice(0, 10)),
+          h("td", { "data-l": "agent" }, agentBadge(e.agent)),
+          h("td", { "data-l": "session" }, e.session + (e.state === "live" ? " (live)" : "")),
+          h("td", { "data-l": "title" }, h("b", null, e.title), e.abstract ? h("div", { class: "sub" }, e.abstract) : null)));
+      });
+      root.appendChild(h("table", { class: "plain stack" },
+        h("thead", null, h("tr", null, ["Date", "Agent", "Session", "Title"].map(function (x) { return h("th", null, x); }))), body));
+    }
+    if (archUi.viewing) {
+      root.appendChild(sublab("Summary", archUi.viewing));
+      root.appendChild(h("pre", { class: "box", text: archUi.summary }));
+    }
+  }
+
   function renderTabs() {
     var nav = clear($("tabs"));
-    TABS.forEach(function (t) {
+    tabList().forEach(function (t) {
       nav.appendChild(h("button", {
         type: "button", role: "tab", "aria-selected": tab === t[0] ? "true" : "false",
         onclick: function () { tab = t[0]; lastKey = ""; render(); }
@@ -837,7 +894,7 @@ a.ext{color:var(--copper-hi)}
 
   function render() {
     if (!state) return;
-    var key = JSON.stringify([state.sessions, state.agents, state.workspaces, state.counts, state.grants, state.config, state.version, state.usage, state.catalog, tab, rawTools, !!mcp, mcpError]) + Math.floor(nowMs() / 30000);
+    var key = JSON.stringify([state.sessions, state.agents, state.workspaces, state.counts, state.grants, state.archive, state.config, state.version, state.usage, state.catalog, tab, rawTools, !!mcp, mcpError]) + Math.floor(nowMs() / 30000);
     renderHeader();
     if (key === lastKey) return;
     lastKey = key;
@@ -849,6 +906,7 @@ a.ext{color:var(--copper-hi)}
     renderSessions(main);
     var tb = clear($("tabbody"));
     if (tab === "tools") renderTools(tb);
+    else if (tab === "archive" && state.archive) renderArchive(tb);
     else renderConnections(tb);
   }
 
@@ -1052,7 +1110,7 @@ a.ext{color:var(--copper-hi)}
     }
     hideDrawer();
     var t = hash.slice(1);
-    if (TABS.some(function (x) { return x[0] === t; }) && t !== tab) { tab = t; lastKey = ""; render(); }
+    if (tabList().some(function (x) { return x[0] === t; }) && t !== tab) { tab = t; lastKey = ""; render(); }
   }
 
   function tick() {
@@ -1085,9 +1143,13 @@ a.ext{color:var(--copper-hi)}
   tick();
   route();
 })();
+__LOGIN_JS__
 </script>
 </body>
 </html>
 `;
 
-export const DASHBOARD_HTML = TEMPLATE.replaceAll("__ICON__", ICON_DATA_URI);
+export const DASHBOARD_HTML = TEMPLATE.replaceAll("__ICON__", ICON_DATA_URI)
+  .replace("__LOGIN_CSS__", () => LOGIN_CSS)
+  .replace("__LOGIN_HTML__", () => LOGIN_HTML)
+  .replace("__LOGIN_JS__", () => LOGIN_JS);

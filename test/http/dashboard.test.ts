@@ -305,3 +305,36 @@ describe("session detail", () => {
     expect((await t.get("/dashboard/api/sessions/nope")).status).toBe(404);
   });
 });
+
+describe("dashboard history", () => {
+  it("searches live sessions, serves 404 for unknown ones, and reports the archive", async () => {
+    const { get, manager, jwt } = await boot({ archive: { summarizer: { agent: "other" } } });
+    const view = await manager.start({ prompt: "reply sprinkler schedule", title: "garden sprinkler" });
+    await settled(manager, view.session);
+    const token = await jwt();
+    const found = (await (await get("/dashboard/api/history?q=SPRINKLER", token)).json()) as {
+      entries: { session: string; state: string }[];
+    };
+    expect(found.entries).toMatchObject([{ session: view.session, state: "live" }]);
+    expect(
+      ((await (await get("/dashboard/api/history?q=nothing-here", token)).json()) as { entries: unknown[] })
+        .entries,
+    ).toEqual([]);
+    expect((await get("/dashboard/api/history?session=ghost", token)).status).toBe(404);
+    expect((await get("/dashboard/api/history?limit=x", token)).status).toBe(400);
+    expect((await get("/dashboard/api/history")).status).toBe(403);
+    const state = (await (await get("/dashboard/api/state?tools=0", token)).json()) as {
+      archive: { count: number; recent: unknown[] };
+    };
+    expect(state.archive).toEqual({ count: 0, recent: [] });
+  });
+
+  it("has no archive section without [archive]", async () => {
+    const { get, jwt } = await boot();
+    const state = (await (await get("/dashboard/api/state?tools=0", await jwt())).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(state.archive).toBeUndefined();
+  });
+});

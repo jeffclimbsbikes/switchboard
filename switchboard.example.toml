@@ -52,6 +52,14 @@ home = "~/src/my-project"
 # [usage.claude]
 # probe = true                           # EXPERIMENTAL: read plan windows through the SDK when no live data is fresh
 
+# Summarize sessions idle for 35 days into <state_dir>/archive, then remove them. See README: Archive and history.
+# [archive]
+# after = "35d"
+# summarizer = { agent = "claude", model = "claude-haiku-4-5" }
+# max_per_run = 20
+# delete_agent_transcripts = false
+# agent_hint = true
+
 # [notify]
 # telegram = { token_env = "TELEGRAM_BOT_TOKEN", chat = "123456789" }
 # ntfy = { url = "https://ntfy.sh/your-topic" }

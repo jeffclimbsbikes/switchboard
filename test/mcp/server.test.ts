@@ -85,6 +85,44 @@ describe("mcp server", () => {
     expect(client.getInstructions()).toBe(INSTRUCTIONS);
   });
 
+  it("offers history only when the manager has it, and passes caller-scoped arguments through", async () => {
+    expect(INSTRUCTIONS).toContain("history");
+    const m = stubManager();
+    const seen: unknown[] = [];
+    const withHistory = {
+      ...m,
+      history: async (input: unknown) => {
+        seen.push(input);
+        return {
+          entries: [
+            {
+              id: "2026-01-01-otter-claude",
+              session: "otter",
+              agent: "claude",
+              title: "packing list",
+              created: "2026-01-01T00:00:00.000Z",
+              updated: "2026-01-02T00:00:00.000Z",
+              state: "archived" as const,
+              abstract: "Built a packing list app.",
+              path: "/a/otter.md",
+            },
+          ],
+        };
+      },
+    };
+    const client = await connect(withHistory);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("history");
+    const r = await call(client, "history", { query: "packing", limit: 5 });
+    expect(seen).toEqual([{ query: "packing", limit: 5 }]);
+    expect(r.content[0]?.text).toContain(
+      "otter · 2026-01-01 · claude · archived — packing list\n  Built a packing list app.\n  /a/otter.md",
+    );
+    expect((await call(client, "history", { limit: 99 })).isError).toBe(true);
+    const plain = await connect(stubManager());
+    expect((await plain.listTools()).tools.map((t) => t.name)).not.toContain("history");
+  });
+
   it("start delegates, then waits briefly and reports progress with a next step", async () => {
     const m = stubManager();
     const client = await connect(m);

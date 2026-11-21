@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import express, { type Request, type Response, type Router } from "express";
 import type { Config } from "../../config.js";
+import type { AccountsService } from "../../core/accounts.js";
 import { type Caller, type DashboardApi, SwitchboardError } from "../../core/api.js";
 import type { Db } from "../../db.js";
 import { VERSION } from "../../mcp/server.js";
@@ -8,6 +9,7 @@ import type { Identify } from "../auth/identity.js";
 import { accessRequiredPage } from "../auth/pages.js";
 import { listGrants } from "../auth/store.js";
 import { contractReader } from "./contract.js";
+import { loginRouter } from "./login.js";
 import { DASHBOARD_HTML } from "./page.js";
 
 export interface DashboardDeps {
@@ -17,6 +19,7 @@ export interface DashboardDeps {
   createMcpServer: () => McpServer;
   identify: Identify;
   now: () => Date;
+  accounts?: AccountsService;
 }
 
 const SECURITY_HEADERS = {
@@ -79,6 +82,8 @@ export function dashboardRouter(deps: DashboardDeps): Router {
     accessRequiredPage(res);
   });
 
+  if (deps.accounts) router.use(loginRouter(config, deps.accounts));
+
   router.get("/dashboard", (_req, res) => {
     res.set({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": PAGE_CSP });
     res.send(DASHBOARD_HTML);
@@ -133,6 +138,36 @@ export function dashboardRouter(deps: DashboardDeps): Router {
           {
             ...(since !== undefined && { since }),
             ...(rawLimit !== undefined && { limit: Number(rawLimit) }),
+          },
+          callerOf(res),
+        ),
+      );
+    } catch (err) {
+      if (err instanceof SwitchboardError && err.code === "not_found") {
+        return void res.status(404).json({ error: "not_found", message: err.message });
+      }
+      throw err;
+    }
+  });
+
+  router.get("/dashboard/api/history", async (req, res) => {
+    const { q, session, limit } = req.query;
+    if (
+      [q, session, limit].some((v) => v !== undefined && typeof v !== "string") ||
+      (typeof limit === "string" && !/^\d+$/.test(limit))
+    ) {
+      return void res
+        .status(400)
+        .json({ error: "bad_input", message: "q, session and limit must be plain strings" });
+    }
+    if (!dashboard.history) return void res.json({ entries: [] });
+    try {
+      res.json(
+        await dashboard.history(
+          {
+            ...(typeof q === "string" && { query: q }),
+            ...(typeof session === "string" && { session }),
+            ...(typeof limit === "string" && { limit: Number(limit) }),
           },
           callerOf(res),
         ),
