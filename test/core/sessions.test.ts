@@ -5,6 +5,7 @@ import type { Notification, Notifier } from "../../src/core/notifier.js";
 import { SessionManager } from "../../src/core/sessions.js";
 import { type Db, openDb } from "../../src/db.js";
 import { FakeDriver } from "../../src/drivers/fake.js";
+import { ScriptedDriver } from "./scripted-driver.js";
 
 function setup(extra: Record<string, unknown> = {}, db: Db = openDb(":memory:"), driver = new FakeDriver()) {
   const config = parseConfig({
@@ -364,5 +365,115 @@ describe("driver selection", () => {
     await m.stop(view.session, "close");
     await m.send(view.session, "count").catch(() => {});
     await m.shutdown();
+  });
+});
+
+describe("refresh", () => {
+  const stateOf = (manager: SessionManager, name: string) =>
+    manager.list().find((s) => s.session === name)?.state;
+  const prompts = (manager: SessionManager, name: string) =>
+    manager.detail(name).events.filter((e) => (e.event as { type: string }).type === "prompt").length;
+
+  it("replaces an idle session's process, keeps its conversation and starts no turn", async () => {
+    const driver = new FakeDriver();
+    const starts: unknown[] = [];
+    const spy = {
+      kind: "fake" as const,
+      start: (o: Parameters<FakeDriver["start"]>[0]) => {
+        starts.push(o);
+        return driver.start(o);
+      },
+    };
+    const { manager, db } = make({}, openDb(":memory:"), spy as unknown as FakeDriver);
+    const { session } = await manager.start({ prompt: "count" });
+    await manager.wait(session);
+    const id = () =>
+      db.prepare("SELECT agent_session_id AS id FROM sessions WHERE name = ?").get(session)?.id;
+    const before = id();
+
+    const view = await manager.refresh(session);
+    expect(view.state).toBe("idle");
+    expect(starts).toHaveLength(2);
+    expect(starts[1]).toMatchObject({ resume: before });
+    expect(id()).toBe(before);
+    expect(prompts(manager, session)).toBe(1);
+
+    await manager.send(session, "count");
+    expect((await manager.wait(session)).reply).toBe("turn 2");
+  });
+
+  it("resumes a parked session now, ending idle", async () => {
+    vi.useFakeTimers();
+    const { manager } = make({ idle_park_after: "1m" });
+    const { session } = await manager.start({ prompt: "count" });
+    await manager.wait(session);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(stateOf(manager, session)).toBe("parked");
+    expect((await manager.refresh(session)).state).toBe("idle");
+    expect(prompts(manager, session)).toBe(1);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(stateOf(manager, session)).toBe("parked");
+  });
+
+  it("refuses while working or waiting, and for closed or failed sessions", async () => {
+    const { manager } = make();
+    const working = await manager.start({ prompt: "slow 60000" });
+    await expectError(manager.refresh(working.session), "busy");
+    const asking = await manager.start({ prompt: "ask which? | a | b" });
+    await manager.wait(asking.session);
+    const err = await expectError(manager.refresh(asking.session), "busy");
+    expect(err.message).toMatch(/respond/i);
+    expect(stateOf(manager, asking.session)).toBe("waiting");
+
+    const done = await manager.start({ prompt: "count" });
+    await manager.wait(done.session);
+    await manager.stop(done.session, "close");
+    await expectError(manager.refresh(done.session), "closed");
+
+    const crashed = await manager.start({ prompt: "count" });
+    await manager.wait(crashed.session);
+    await manager.send(crashed.session, "crash");
+    await manager.wait(crashed.session);
+    await expectError(manager.refresh(crashed.session), "bad_input");
+    await expectError(manager.refresh("nope"), "not_found");
+  });
+
+  it("refuses a session without a conversation id and leaves its process alone", async () => {
+    const { manager, db } = make();
+    const { session } = await manager.start({ prompt: "count" });
+    await manager.wait(session);
+    db.prepare("UPDATE sessions SET agent_session_id = NULL WHERE name = ?").run(session);
+    await expectError(manager.refresh(session), "bad_input");
+    expect(stateOf(manager, session)).toBe("idle");
+    await manager.send(session, "count");
+    expect((await manager.wait(session)).reply).toBe("turn 2");
+  });
+
+  it("does not double count cost: the resumed process starts from the recorded total", async () => {
+    const driver = new ScriptedDriver();
+    const { manager, db } = make({}, openDb(":memory:"), driver as unknown as FakeDriver);
+    const { session } = await manager.start({ prompt: "hi" });
+    await manager.wait(session);
+    const row = () => db.prepare("SELECT turns, cost_usd AS cost FROM sessions WHERE name = ?").get(session);
+    await manager.refresh(session);
+    expect(driver.starts.at(-1)?.priorCostUsd).toBe(0.5);
+    expect(row()).toMatchObject({ turns: 1, cost: 0.5 });
+    await manager.send(session, "again");
+    await manager.wait(session);
+    expect(driver.starts).toHaveLength(2);
+    expect(row()).toMatchObject({ turns: 2, cost: 1 });
+  });
+
+  it("refreshes every live idle session and reports the rest as skipped", async () => {
+    const { manager } = make({ max_live_sessions: 5 });
+    const idle = await manager.start({ prompt: "count" });
+    await manager.wait(idle.session);
+    const busy = await manager.start({ prompt: "slow 60000" });
+    const closed = await manager.start({ prompt: "count" });
+    await manager.wait(closed.session);
+    await manager.stop(closed.session, "close");
+    const report = await manager.refreshAll();
+    expect(report.refreshed.map((s) => s.session)).toEqual([idle.session]);
+    expect(report.skipped).toEqual([{ session: busy.session, state: "working", reason: "busy" }]);
   });
 });

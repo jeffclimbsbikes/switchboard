@@ -48,6 +48,11 @@ export interface SessionView {
   updatedAt: string;
 }
 
+export interface RefreshReport {
+  refreshed: SessionView[];
+  skipped: { session: string; state: SessionState; reason: string }[];
+}
+
 export interface WaitResult {
   session: string;
   state: SessionState;

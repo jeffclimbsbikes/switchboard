@@ -52,9 +52,12 @@ A `fake` driver exists for tests. Agents can optionally run as another Unix user
 | `respond` | answer a question or approval in the user's words ("blue", "2", "allow") |
 | `sessions` | everything, one line each, optionally filtered by state |
 | `stop` | `interrupt` the current turn or `close` the session |
+| `refresh` | restart a session's agent with its conversation intact so it reloads instructions, skills, plugins and MCP servers; no `session` refreshes every idle session |
 | `history` | search live and archived sessions, or read an archived summary (only with `[archive]`) |
 
-The server's MCP instructions tell the client it is pairing with a live agent, not filling in a form: delegate whole tasks, give short natural updates while waiting (8 to 10 s waits in voice), answer the agent's questions itself only when you already told it the answer, otherwise ask you and pass your answer to `respond`, report the outcome when a turn ends, and use `stop` only when asked. The dashboard shows the exact text.
+The server's MCP instructions tell the client it is pairing with a live agent, not filling in a form: delegate whole tasks, give short natural updates while waiting (8 to 10 s waits in voice), answer the agent's questions itself only when you already told it the answer, otherwise ask you and pass your answer to `respond`, report the outcome when a turn ends, use `refresh` when the machine's instructions, skills or MCP servers changed, and use `stop` only when asked. The dashboard shows the exact text.
+
+`refresh` closes the agent process and resumes it with the same conversation id, without sending a message, and the session ends `idle`. It works on `idle` sessions and, for a single named session, on `parked` ones (resumed now). It refuses with a `busy` error while a session is `working` or `waiting`: finish the turn, answer the request or `stop` with `interrupt` first. `failed`, `closed` and sessions without a conversation id get an error. Without `session`, every idle live session the caller can see is refreshed and the rest are listed as skipped; parked sessions need nothing, because they start a fresh process on their next `send`. Cost and turn counts are not double counted, and restricted users can only refresh their own sessions.
 
 ## Quick start (local, Claude Code or Claude Desktop)
 

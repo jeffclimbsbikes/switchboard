@@ -4,6 +4,7 @@ import type {
   DashboardSnapshot,
   HistoryQuery,
   HistoryResult,
+  RefreshReport,
   SessionState,
   SessionSummary,
   SessionView,
@@ -46,6 +47,15 @@ export interface SessionManagerApi {
   /** Search live and archived sessions, or read one session's summary. Optional: stubs may omit it. */
   history?(input: HistoryQuery, caller?: Caller): Promise<HistoryResult>;
   stop(session: string, mode: "interrupt" | "close", caller?: Caller): Promise<SessionView>;
+  /**
+   * Restart an idle (live) session's agent process with the same conversation, so it reloads its
+   * instructions, skills and MCP servers; a parked session is resumed now. No turn is started and the
+   * session ends idle. Throws `busy` while a turn is running or a request is pending, and `bad_input`
+   * for failed sessions or ones without a conversation id.
+   */
+  refresh(session: string, caller?: Caller): Promise<SessionView>;
+  /** `refresh` for every live idle session the caller can see. Busy, parked and failed ones are reported as skipped. */
+  refreshAll(caller?: Caller): Promise<RefreshReport>;
   shutdown(): Promise<void>;
 }
 

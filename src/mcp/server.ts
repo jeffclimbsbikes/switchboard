@@ -23,6 +23,7 @@ How to work with it:
 - If the user wants to move on, that's fine: the agent keeps working and the user gets a notification when it finishes or needs them. sessions lists everything later.
 - To choose an agent or workspace, call agents when the user names a tool or model or you are unsure which fits, and pick by description; otherwise use the defaults. Tell the user which agent you used when it isn't the default. A session keeps its agent: start a new session to switch.
 - Use history when the user refers to earlier work ("the thing we built last month"): it searches live and archived sessions, and a session name returns its full summary.
+- When the machine's instructions, skills or MCP servers changed, use refresh: it restarts idle sessions with their conversation intact, without sending a message.
 - Use stop only when the user asks (interrupt stops the current turn; close ends the session).`;
 
 const sessionArg = z.string().describe("Session name, e.g. “otter”.");
@@ -350,6 +351,34 @@ export function createMcpServer(manager: SessionManagerApi, opts: { maxWaitMs: n
     wrap(async ({ session, mode }: { session: string; mode: "interrupt" | "close" }, caller) => {
       const view = await manager.stop(session, mode, caller);
       return result(`“${view.session}” is ${view.state}.`, { ...view, next: nextStep(view.state) });
+    }),
+  );
+
+  server.registerTool(
+    "refresh",
+    {
+      title: "Refresh sessions",
+      description:
+        "Restart a session's agent process with its conversation intact, so it reloads its instructions (AGENTS.md / CLAUDE.md), skills, plugins and MCP servers from disk. No message is sent and no turn starts; the session ends idle. Only works on an idle or parked session; refuses while it is working or waiting on a request (finish or interrupt first). Omit session to refresh every idle session you can see; sessions that are parked already start fresh on their next send.",
+      inputSchema: {
+        session: z.string().optional().describe("Session name. Omit to refresh all idle sessions."),
+      },
+    },
+    wrap(async ({ session }: { session?: string }, caller) => {
+      if (session) {
+        const view = await manager.refresh(session, caller);
+        return result(`“${view.session}” was refreshed and is ${view.state}.`, {
+          ...view,
+          next: nextStep(view.state),
+        });
+      }
+      const report = await manager.refreshAll(caller);
+      const names = report.refreshed.map((s) => s.session);
+      const lines = [
+        names.length ? `Refreshed: ${names.join(", ")}.` : "No idle sessions to refresh.",
+        ...report.skipped.map((s) => `Skipped ${s.session} (${s.state}): ${s.reason}`),
+      ];
+      return result(lines.join("\n"), { ...report });
     }),
   );
 

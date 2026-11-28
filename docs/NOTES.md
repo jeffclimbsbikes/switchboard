@@ -60,3 +60,20 @@ agent executable is.
 3. HTTP + OAuth (+ test JWKS)              4. server: systemd, Terraform, Telegram; voice test
 5. AcpDriver (OpenCode spike first)        6. worktrees, per-tool rules, app link
 Day-one spike: stub connector on switchboard.example.com to test voice + timeouts.
+
+## Refresh (restart an agent, keep the conversation)
+- Decision: a new small tool `refresh` (optional `session`), not a mode on `stop`.
+  `stop` is marked destructive and means "end"; refresh is non-destructive and
+  needs its own description so clients reach for it when instructions, skills or
+  MCP servers changed. Omitting `session` is the bulk form.
+- Decision: no `force`. A working or waiting session is refused (`busy`); the
+  caller composes `stop` interrupt + `refresh`. Killing a turn or dropping a
+  pending approval is a decision for the user, not a flag.
+- Mechanics: idle live session = mark `starting` (so a racing `send` gets
+  `busy`), retire the process, `resume` with the stored agent conversation id
+  and `priorCostUsd`, then settle on `idle` and re-arm the park timer. No turn
+  starts, so cost/turn totals are untouched. Parked = resume now. Failed, closed
+  or id-less sessions error clearly.
+- Bulk only restarts live idle sessions: parked ones have no process and already
+  load fresh config on resume, and resuming them all would churn the live slots.
+- The dashboard stays read-only; it lists the tool contract automatically.

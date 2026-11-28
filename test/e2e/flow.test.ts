@@ -84,7 +84,7 @@ describe("end to end: claude.ai-style client over HTTP + OAuth, real core, fake 
 
   it("sees the instructions and tools", async () => {
     expect(client.getInstructions()).toMatch(/real coding agents/);
-    expect((await client.listTools()).tools).toHaveLength(7);
+    expect((await client.listTools()).tools).toHaveLength(8);
     const agents = await call("agents");
     expect(agents.structuredContent).toMatchObject({ agents: [{ id: "fake", default: true }] });
   });

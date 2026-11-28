@@ -93,6 +93,7 @@ describe("per-user scoping", () => {
       () => manager.respond(bobs.session, "r", "yes", ALICE),
       () => manager.wait(bobs.session, { maxWaitMs: 0 }, ALICE),
       () => manager.stop(bobs.session, "close", ALICE),
+      () => manager.refresh(bobs.session, ALICE),
       () => manager.send(admins.session, "x", ALICE),
       () => manager.stop("nonexistent", "close", ALICE),
     ]) {
@@ -101,6 +102,18 @@ describe("per-user scoping", () => {
     const err = await manager.stop(bobs.session, "close", ALICE).catch((e: Error) => e);
     expect((err as Error).message).toContain(`Sessions: ${mine.session}.`);
     expect((err as Error).message.split("Sessions:")[1]).not.toContain(bobs.session);
+  });
+
+  it("refreshes only the sessions the caller can see", async () => {
+    const { manager } = setup();
+    const mine = await manager.start({ prompt: "mine" }, ALICE);
+    const bobs = await manager.start({ prompt: "bobs" }, BOB);
+    await manager.wait(mine.session, { maxWaitMs: 500 }, ALICE);
+    await manager.wait(bobs.session, { maxWaitMs: 500 }, BOB);
+    const report = await manager.refreshAll(ALICE);
+    expect(report.refreshed.map((s) => s.session)).toEqual([mine.session]);
+    expect(report.skipped).toEqual([]);
+    expect((await manager.refreshAll(ADMIN)).refreshed).toHaveLength(2);
   });
 
   it("lets unrestricted callers act on restricted users' sessions", async () => {

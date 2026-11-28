@@ -52,6 +52,17 @@ function stubManager(): SessionManagerApi & { calls: unknown[][]; next: Partial<
       calls.push(["stop", s, mode]);
       return { ...view, state: mode === "close" ? ("closed" as const) : ("idle" as const) };
     },
+    refresh: async (s: string) => {
+      calls.push(["refresh", s]);
+      return { ...view, state: "idle" as const };
+    },
+    refreshAll: async () => {
+      calls.push(["refreshAll"]);
+      return {
+        refreshed: [{ ...view, state: "idle" as const }],
+        skipped: [{ session: "mink", state: "working" as const, reason: "busy" }],
+      };
+    },
     shutdown: async () => {},
   };
   return m;
@@ -76,11 +87,11 @@ async function call(client: Client, name: string, args: Record<string, unknown> 
 }
 
 describe("mcp server", () => {
-  it("advertises the seven tools and instructions", async () => {
+  it("advertises the eight tools and instructions", async () => {
     const client = await connect(stubManager());
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["agents", "respond", "send", "sessions", "start", "stop", "wait"].sort(),
+      ["agents", "refresh", "respond", "send", "sessions", "start", "stop", "wait"].sort(),
     );
     expect(client.getInstructions()).toBe(INSTRUCTIONS);
   });
@@ -214,6 +225,20 @@ describe("mcp server", () => {
   it("explains how to choose an agent", () => {
     expect(INSTRUCTIONS).toMatch(/call agents/);
     expect(INSTRUCTIONS).toMatch(/start a new session to switch/);
+  });
+
+  it("refreshes one session or every idle one", async () => {
+    const m = stubManager();
+    const client = await connect(m);
+    const one = await call(client, "refresh", { session: "otter" });
+    expect(one.structuredContent).toMatchObject({ session: "otter", state: "idle" });
+    const all = await call(client, "refresh");
+    expect(all.content[0]?.text).toContain("Refreshed: otter.");
+    expect(all.content[0]?.text).toContain("Skipped mink (working): busy");
+    expect(m.calls.filter((c) => c[0] === "refresh" || c[0] === "refreshAll")).toEqual([
+      ["refresh", "otter"],
+      ["refreshAll"],
+    ]);
   });
 
   it("lists sessions and stops them", async () => {

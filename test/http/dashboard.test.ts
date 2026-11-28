@@ -9,7 +9,7 @@ import { createMcpServer, INSTRUCTIONS } from "../../src/mcp/server.js";
 import { AUD, baseConfig, exchange, getCode, type Harness, OWNER, pkce, register, TEAM } from "./harness.js";
 
 const ALICE = "alice@example.com";
-const TOOLS = ["agents", "respond", "send", "sessions", "start", "stop", "wait"];
+const TOOLS = ["agents", "refresh", "respond", "send", "sessions", "start", "stop", "wait"];
 
 type Schema = {
   type: string;

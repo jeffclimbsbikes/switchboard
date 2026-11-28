@@ -147,6 +147,7 @@
           <tr><td><code>wait</code></td><td><code>session</code>, cursor?, seconds ≤ 25</td><td>what it's doing now, question, or final reply</td></tr>
           <tr><td><code>respond</code></td><td><code>session</code>, <code>request</code>, answer</td><td>state (agent continues)</td></tr>
           <tr><td><code>sessions</code></td><td>state?</td><td>one line each: name, agent, state, last activity</td></tr>
+          <tr><td><code>refresh</code></td><td>session?</td><td>state (idle); restarts the agent, keeps the conversation</td></tr>
           <tr><td><code>stop</code></td><td><code>session</code>, interrupt | close</td><td>state</td></tr>
         </tbody>
       </table>
@@ -184,7 +185,7 @@
 
 <section id="more">
   <h2>Dashboard, models, usage and people</h2>
-  <p class="sub">Beyond the seven tools, the same process serves a read-only dashboard and can share one install between several people.</p>
+  <p class="sub">Beyond the core tools, the same process serves a read-only dashboard and can share one install between several people.</p>
   <div class="grid g2">
     <div class="card"><h3>Dashboard</h3><p><code>/dashboard</code> is a phone-friendly, no-build page: live counts, sessions by state with their pending questions, per-session event timelines, the MCP contract clients see, and connected clients. It sits behind the same Access application as <code>/authorize</code>.</p></div>
     <div class="card"><h3>Model catalogs</h3><p>An agent can list the models it offers, with optional prices per million tokens. The <code>agents</code> tool shows them, and <code>start({ model })</code> must pick one, so the client can weigh cost against difficulty.</p></div>

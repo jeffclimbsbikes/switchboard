@@ -16,6 +16,7 @@ import type {
   HistoryQuery,
   HistoryResult,
   ModelInfo,
+  RefreshReport,
   SessionState,
   SessionSummary,
   SessionView,
@@ -418,6 +419,74 @@ export class SessionManager implements SessionManagerApi, DashboardApi {
     this.store.update(session, { state: "closed", pending: null, updatedAt: this.stamp() });
     this.append(session, { type: "note", text: "session closed" });
     return this.view(session);
+  }
+
+  async refresh(session: string, caller?: Caller): Promise<SessionView> {
+    const row = this.require(session, resolveAccess(this.config, caller));
+    switch (row.state) {
+      case "closed":
+        throw new SwitchboardError(`${session} is closed. Start a new session instead.`, "closed");
+      case "failed":
+        throw new SwitchboardError(
+          `${session} failed. Send it a message to resume it; there is nothing to refresh.`,
+          "bad_input",
+        );
+      case "working":
+      case "starting":
+        throw new SwitchboardError(
+          `${session} is still working. Wait for it to finish, or interrupt it, then refresh.`,
+          "busy",
+        );
+      case "waiting":
+        throw new SwitchboardError(
+          `${session} is waiting for an answer. Respond to its request first, then refresh.`,
+          "busy",
+        );
+    }
+    if (!row.agentSessionId) {
+      throw new SwitchboardError(
+        `${session} cannot be refreshed: the agent never reported a conversation id. Start a new session instead.`,
+        "bad_input",
+      );
+    }
+    const proc = this.live.get(session);
+    if (proc?.session) {
+      this.store.update(session, { state: "starting", updatedAt: this.stamp() });
+      this.live.delete(session);
+      await this.retire(proc);
+    }
+    await this.resume(this.require(session));
+    const fresh = this.live.get(session);
+    if (fresh && this.store.get(session)?.state === "starting") {
+      this.store.update(session, { state: "idle", updatedAt: this.stamp() });
+      this.armPark(session, fresh);
+    }
+    this.append(session, {
+      type: "note",
+      text: "agent restarted; instructions, skills and MCP servers reloaded",
+    });
+    return this.view(session);
+  }
+
+  async refreshAll(caller?: Caller): Promise<RefreshReport> {
+    const access = resolveAccess(this.config, caller);
+    const report: RefreshReport = { refreshed: [], skipped: [] };
+    for (const row of this.store.list().filter((r) => canSee(access, r.owner))) {
+      if (row.state === "closed") continue;
+      const skip = (reason: string) => report.skipped.push({ session: row.name, state: row.state, reason });
+      if (row.state === "parked") skip("no process running; it starts fresh on the next send");
+      else if (row.state !== "idle") skip(row.state === "failed" ? "failed; send resumes it" : "busy");
+      else if (!this.live.get(row.name)?.session)
+        skip("no process running; it starts fresh on the next send");
+      else {
+        try {
+          report.refreshed.push(await this.refresh(row.name, caller));
+        } catch (err) {
+          skip(messageOf(err));
+        }
+      }
+    }
+    return report;
   }
 
   async shutdown(): Promise<void> {
